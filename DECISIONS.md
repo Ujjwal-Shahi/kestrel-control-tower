@@ -65,6 +65,10 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
 Real outlet disambiguation (GPS/phone, not name/city); an order-level
 freight join if the API ever exposes one; regional-manager auth instead of
 an open filter; a real LLM upgrade with safe execution and citations.
+Also considered and rejected: orchestrating ETL/scraper/freight as an n8n
+workflow instead of plain scripts — needs its own server/account, breaking
+the cold-start bar this is graded on. Worth it once the pipeline runs on
+a schedule against live systems, not as a reviewer-run local script.
 
 ## Breaks first in production
 

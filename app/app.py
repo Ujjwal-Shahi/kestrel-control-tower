@@ -9,6 +9,7 @@ import config
 import data
 import metrics
 import nl
+import charts
 
 st.set_page_config(page_title="Kestrel Control Tower", layout="wide")
 
@@ -54,8 +55,12 @@ def sidebar_filters(ctx):
 
     channel = st.sidebar.selectbox("Channel", ["All", "GT", "MT", "HORECA", "ECOM_DARKSTORE"])
 
-    date_min = ctx["ol"]["order_date"].min().date()
-    date_max = ctx["ol"]["order_date"].max().date()
+    # Bounds span order_date AND return_date -- a return can be filed weeks
+    # after its order (return_date max is 2026-07-29 vs order_date max
+    # 2026-06-30 in this data), so bounding on order_date alone silently
+    # clipped the returns-based KPIs even at the "full range" default.
+    date_min = min(ctx["ol"]["order_date"].min(), ctx["rt"]["return_date"].min()).date()
+    date_max = max(ctx["ol"]["order_date"].max(), ctx["rt"]["return_date"].max()).date()
     date_range = st.sidebar.date_input("Date range", value=(date_min, date_max),
                                         min_value=date_min, max_value=date_max)
     if region != "All":
@@ -117,7 +122,8 @@ def overview_tab(ctx, ol, dv, od, rt):
     st.dataframe(worst[worst["ordered_eaches"] > 0].head(5), use_container_width=True)
 
     st.markdown("**Fill rate by region, Q1**")
-    st.bar_chart(fr.set_index("region_name")["fill_rate_pct"])
+    st.altair_chart(charts.bar(fr, "region_name", "fill_rate_pct", "Region", "Fill rate %"),
+                     use_container_width=True)
 
 
 def service_tab(ol, dv):
@@ -138,7 +144,8 @@ def cold_chain_tab(ctx, dv, rt):
     st.subheader("Cold chain")
     exc = metrics.cold_chain_excursions_by_month(dv)
     st.markdown("Temperature excursions per hundred chilled deliveries, by month")
-    st.line_chart(exc.set_index("month")["excursions_per_100"])
+    st.altair_chart(charts.line(exc, "month", "excursions_per_100", "Month", "Excursions / 100"),
+                     use_container_width=True)
 
     st.markdown("Near-expiry inventory (ageing bucket 61-90 or 90+ days)")
     inv = ctx["data"]["inventory"]
@@ -165,8 +172,10 @@ def money_tab(ctx, ol, rt):
         st.caption("Excludes DISPUTED invoices (contested, unsettled) -- see DECISIONS.md.")
 
         st.markdown("Freight spend by carrier")
-        by_carrier = ctx["freight"].groupby("carrier_name")["amount_inr"].sum().sort_values(ascending=False)
-        st.bar_chart(by_carrier)
+        by_carrier = ctx["freight"].groupby("carrier_name")["amount_inr"].sum() \
+            .sort_values(ascending=False).reset_index()
+        st.altair_chart(charts.bar(by_carrier, "carrier_name", "amount_inr", "Carrier", "Spend (INR)"),
+                         use_container_width=True)
 
     st.markdown("Returns leakage by category (value and leading reason)")
     leak = metrics.returns_leakage_by_category(rt, ctx["data"]["products"])
