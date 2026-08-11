@@ -156,7 +156,7 @@ def returns_leakage_by_category(returns, products):
 def returns_pct_of_dispatch(returns, orders):
     dispatch_value = orders.loc[orders["order_status"].isin(FULFILLED_STATUSES), "order_value_net_inr"].sum()
     returns_value = returns["credit_note_value_inr"].sum()
-    overall = round(returns_value / dispatch_value * 100, 2) if dispatch_value else None
+    overall = round(returns_value / dispatch_value * 100, 1) if dispatch_value else None
     return overall
 
 

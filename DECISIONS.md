@@ -55,8 +55,17 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
 - **Price matching uses literal `(pack_value, pack_uom)` equality**, not
   unit correction — Kestrel's own catalog has the same "400kg snack"
   anomalies and BazaarPulse reproduces them faithfully, so literal
-  matching is more correct than "fixing" units would be (91% matched;
-  per-method thresholds — 70 on exact pack, 90 on fuzzy-only fallback).
+  matching is more correct than "fixing" units would be. Fuzzy scoring
+  uses `WRatio`, not `token_sort_ratio` — the latter once ranked a
+  wrong-brand, same-pack product above the true match ("AmritValley" vs
+  catalog "Amrit Valley" spacing); `WRatio` resolves it correctly. 100%
+  matched (75 exact-pack / 90 fuzzy-fallback thresholds), zero category
+  mismatches on spot-check.
+- **The NL layer answers one capability per question**, by design — a
+  two-part question ("why did OTIF and fill rate both drop") silently
+  answers only the first match. Fixing this needs an LLM or a
+  multi-intent router, which reintroduces the complexity the
+  deterministic layer exists to avoid. Accepted, not fixed.
 - `/internal/margin-sheet.html` found, deliberately not scraped —
   `robots.txt` disallows it and it's irrelevant to the task.
 

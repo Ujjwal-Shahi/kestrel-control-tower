@@ -82,48 +82,74 @@ def apply_filters(df, region, warehouse, channel, date_range, date_col="order_da
     return out
 
 
+def _quarter_headline(ol, dv, od, rt, q_start, q_end):
+    """The 4 Overview KPIs for one quarter window, given already-filtered frames."""
+    q_ol = ol[(ol["order_date"] >= q_start) & (ol["order_date"] <= q_end)]
+    q_dv = dv[(dv["order_date"] >= q_start) & (dv["order_date"] <= q_end)]
+    q_od = od[(od["order_date"] >= q_start) & (od["order_date"] <= q_end)]
+    q_rt = rt[(rt["return_date"] >= q_start) & (rt["return_date"] <= q_end)]
+
+    overall_fr = (q_ol[q_ol["order_status"].isin(metrics.FULFILLED_STATUSES) & q_ol["is_reportable"]]
+                  [["delivered_eaches", "ordered_eaches"]].sum())
+    fr_pct = round(overall_fr["delivered_eaches"] / overall_fr["ordered_eaches"] * 100, 1) \
+        if overall_fr["ordered_eaches"] else None
+
+    ot = metrics.otif(q_dv, q_ol, ["region_name"])
+    otif_pct = round(ot["otif_count"].sum() / ot["deliveries"].sum() * 100, 1) if ot["deliveries"].sum() else None
+
+    exc = metrics.cold_chain_excursions_by_month(q_dv)
+    exc_rate = round(exc["excursions"].sum() / exc["chilled_deliveries"].sum() * 100, 1) \
+        if len(exc) and exc["chilled_deliveries"].sum() else None
+
+    ret_pct = metrics.returns_pct_of_dispatch(q_rt, q_od)
+    return q_ol, fr_pct, otif_pct, exc_rate, ret_pct
+
+
+def _delta(current, prior, higher_is_better=True):
+    """(delta_string, delta_color) for st.metric -- None if either side is n/a."""
+    if current is None or prior is None:
+        return None, "off"
+    d = round(current - prior, 1)
+    return f"{d:+.1f} pts vs prior qtr", ("normal" if higher_is_better else "inverse")
+
+
 def overview_tab(ctx, ol, dv, od, rt):
     # Quarter boundary derived from the data's own max date (unfiltered), not
     # hardcoded -- stays correct if the db is later refreshed with more months.
     q_start, q_end = metrics.last_complete_fy_quarter(ctx["ol"]["order_date"].max())
+    prior_start, prior_end = metrics.last_complete_fy_quarter(q_start - pd.Timedelta(days=1))
     st.subheader(f"Q{((q_start.month - 4) % 12) // 3 + 1} FY -- {q_start:%b %Y} to {q_end:%b %Y} "
                  f"(the board asks about Q1 first)")
-    q1_ol = ol[(ol["order_date"] >= q_start) & (ol["order_date"] <= q_end)]
-    q1_dv = dv[(dv["order_date"] >= q_start) & (dv["order_date"] <= q_end)]
-    q1_od = od[(od["order_date"] >= q_start) & (od["order_date"] <= q_end)]
-    q1_rt = rt[(rt["return_date"] >= q_start) & (rt["return_date"] <= q_end)]
 
-    fr = metrics.fill_rate_eaches(q1_ol, ["region_name"])
-    overall_fr = (q1_ol[q1_ol["order_status"].isin(metrics.FULFILLED_STATUSES) & q1_ol["is_reportable"]]
-                  [["delivered_eaches", "ordered_eaches"]].sum())
-    overall_fr_pct = round(overall_fr["delivered_eaches"] / overall_fr["ordered_eaches"] * 100, 1) \
-        if overall_fr["ordered_eaches"] else None
-
-    ot = metrics.otif(q1_dv, q1_ol, ["region_name"])
-    overall_otif = round(ot["otif_count"].sum() / ot["deliveries"].sum() * 100, 1) if ot["deliveries"].sum() else None
-
-    exc = metrics.cold_chain_excursions_by_month(q1_dv)
-    exc_rate = round(exc["excursions"].sum() / exc["chilled_deliveries"].sum() * 100, 1) \
-        if len(exc) and exc["chilled_deliveries"].sum() else None
-
-    # Same active filters (region/warehouse/channel/date range) as every other
-    # KPI on this page -- previously this ignored them and always summed the
-    # global returns/orders tables, so this number never moved with the filters.
-    ret_pct = metrics.returns_pct_of_dispatch(q1_rt, q1_od)
+    q1_ol, fr_pct, otif_pct, exc_rate, ret_pct = _quarter_headline(ol, dv, od, rt, q_start, q_end)
+    _, prior_fr, prior_otif, prior_exc, prior_ret = _quarter_headline(ol, dv, od, rt, prior_start, prior_end)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Case fill rate (eaches)", f"{overall_fr_pct}%" if overall_fr_pct is not None else "n/a")
-    c2.metric("OTIF", f"{overall_otif}%" if overall_otif is not None else "n/a")
-    c3.metric("Cold-chain excursions / 100 chilled deliveries", f"{exc_rate}" if exc_rate is not None else "n/a")
-    c4.metric("Returns as % of dispatch value", f"{ret_pct}%" if ret_pct is not None else "n/a")
+    d, dc = _delta(fr_pct, prior_fr, higher_is_better=True)
+    c1.metric("Case fill rate (eaches)", f"{fr_pct}%" if fr_pct is not None else "n/a", delta=d, delta_color=dc)
+    d, dc = _delta(otif_pct, prior_otif, higher_is_better=True)
+    c2.metric("OTIF", f"{otif_pct}%" if otif_pct is not None else "n/a", delta=d, delta_color=dc)
+    d, dc = _delta(exc_rate, prior_exc, higher_is_better=False)
+    c3.metric("Cold-chain excursions / 100 chilled deliveries", f"{exc_rate}" if exc_rate is not None else "n/a",
+              delta=d, delta_color=dc)
+    d, dc = _delta(ret_pct, prior_ret, higher_is_better=False)
+    c4.metric("Returns as % of dispatch value", f"{ret_pct}%" if ret_pct is not None else "n/a",
+              delta=d, delta_color=dc)
+    st.caption(f"Delta vs prior quarter ({prior_start:%b %Y} to {prior_end:%b %Y}). "
+               "Colour follows whether the direction is good or bad for that metric, not just up/down.")
 
     st.markdown("**Worst 5 outlets by fill rate, Q1**")
     worst = metrics.fill_rate_eaches(q1_ol, ["outlet_name"])
-    st.dataframe(worst[worst["ordered_eaches"] > 0].head(5), use_container_width=True)
+    st.dataframe(worst[worst["ordered_eaches"] > 0].head(5), use_container_width=True,
+                 column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
 
     st.markdown("**Fill rate by region, Q1**")
+    fr = metrics.fill_rate_eaches(q1_ol, ["region_name"])
     st.altair_chart(charts.bar(fr, "region_name", "fill_rate_pct", "Region", "Fill rate %"),
                      use_container_width=True)
+    with st.expander("View as table"):
+        st.dataframe(fr, use_container_width=True,
+                     column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
 
 
 def service_tab(ol, dv):
@@ -146,6 +172,9 @@ def cold_chain_tab(ctx, dv, rt):
     st.markdown("Temperature excursions per hundred chilled deliveries, by month")
     st.altair_chart(charts.line(exc, "month", "excursions_per_100", "Month", "Excursions / 100"),
                      use_container_width=True)
+    with st.expander("View as table"):
+        st.dataframe(exc, use_container_width=True,
+                     column_config={"excursions_per_100": st.column_config.NumberColumn(format="%.1f")})
 
     st.markdown("Near-expiry inventory (ageing bucket 61-90 or 90+ days)")
     inv = ctx["data"]["inventory"]
@@ -168,7 +197,10 @@ def money_tab(ctx, ol, rt):
         st.info("No freight data loaded. Run `python -m freight.ingest`.")
     else:
         fc = metrics.freight_cost_per_case(ctx["freight"], ol, ctx["data"]["warehouses"])
-        st.dataframe(fc, use_container_width=True)
+        st.dataframe(fc, use_container_width=True, column_config={
+            "amount_inr": st.column_config.NumberColumn("Freight amount (INR)", format="%,.0f"),
+            "freight_cost_per_case_inr": st.column_config.NumberColumn("Cost / case (INR)", format="%,.2f"),
+        })
         st.caption("Excludes DISPUTED invoices (contested, unsettled) -- see DECISIONS.md.")
 
         st.markdown("Freight spend by carrier")
@@ -176,10 +208,16 @@ def money_tab(ctx, ol, rt):
             .sort_values(ascending=False).reset_index()
         st.altair_chart(charts.bar(by_carrier, "carrier_name", "amount_inr", "Carrier", "Spend (INR)"),
                          use_container_width=True)
+        with st.expander("View as table"):
+            st.dataframe(by_carrier, use_container_width=True, column_config={
+                "amount_inr": st.column_config.NumberColumn("Spend (INR)", format="%,.0f"),
+            })
 
     st.markdown("Returns leakage by category (value and leading reason)")
     leak = metrics.returns_leakage_by_category(rt, ctx["data"]["products"])
-    st.dataframe(leak, use_container_width=True)
+    st.dataframe(leak, use_container_width=True, column_config={
+        "credit_note_value_inr": st.column_config.NumberColumn("Credit note value (INR)", format="%,.0f"),
+    })
 
 
 def price_tab(ctx):
@@ -190,18 +228,52 @@ def price_tab(ctx):
     city = st.selectbox("City", ["All"] + sorted(ctx["price_matches"]["city"].dropna().unique().tolist()))
     pp = metrics.price_position(ctx["price_matches"], ctx["data"]["products"], city=None if city == "All" else city)
     st.markdown("Positive gap = we are priced above the lowest competitor; negative = below")
-    st.dataframe(pp, use_container_width=True)
+    st.dataframe(pp, use_container_width=True, column_config={
+        "lowest_competitor_price_inr": st.column_config.NumberColumn("Lowest competitor price (INR)", format="%,.2f"),
+        "kestrel_mrp_inr": st.column_config.NumberColumn("Kestrel MRP (INR)", format="%,.2f"),
+        "gap_inr": st.column_config.NumberColumn("Gap (INR)", format="%,.2f"),
+        "gap_pct": st.column_config.NumberColumn("Gap %", format="%.1f%%"),
+    })
     match_rate = ctx["price_matches"]["matched_sku_code"].notna().mean() * 100
-    st.caption(f"{match_rate:.0f}% of scraped listings matched to a Kestrel SKU with confidence >= 70 "
-               f"(see DECISIONS.md on matching method).")
+    st.caption(f"{match_rate:.0f}% of scraped listings matched to a Kestrel SKU "
+               f"(see DECISIONS.md on matching method and confidence thresholds).")
+
+
+SUGGESTED_QUESTIONS = [
+    "which outlets had the lowest fill rate",
+    "what was OTIF by region",
+    "why did fill rate drop in the West last week",
+    "MRP vs competitor price in Mumbai",
+]
 
 
 def ask_tab(ctx):
     st.subheader("Ask anything")
-    st.caption(nl.CAPABILITIES.split("\n")[0])
-    with st.expander("What can I ask?"):
+    if "ask_question" not in st.session_state:
+        st.session_state["ask_question"] = ""
+
+    st.caption("Try one of these, or type your own below -- no LLM key needed for any of it:")
+    cols = st.columns(len(SUGGESTED_QUESTIONS))
+    for i, sq in enumerate(SUGGESTED_QUESTIONS):
+        if cols[i].button(sq, use_container_width=True, key=f"chip_{i}"):
+            st.session_state["ask_question"] = sq
+
+    with st.expander("Full list of what I can answer"):
         st.text(nl.CAPABILITIES)
-    q = st.text_input("Question", placeholder="e.g. why did fill rate drop in the West last week")
+
+    # A plain st.text_input + "if q:" re-showed the PREVIOUS question's answer
+    # for one rerun after pressing Enter on a new one -- the widget's committed
+    # value and the script's read of it weren't guaranteed to land in the same
+    # rerun. st.form makes the text_input's value and the submit action land
+    # together, atomically, so what's answered is always what was just typed.
+    with st.form("ask_form"):
+        q_input = st.text_input("Question", value=st.session_state["ask_question"],
+                                 placeholder="e.g. why did fill rate drop in the West last week")
+        submitted = st.form_submit_button("Ask")
+    if submitted:
+        st.session_state["ask_question"] = q_input
+
+    q = st.session_state["ask_question"]
     if q:
         text, df = nl.answer(q, ctx)
         st.markdown(text)

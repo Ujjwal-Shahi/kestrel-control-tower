@@ -52,7 +52,7 @@ def t_lowest_fill_rate(q, ctx):
 
 def t_otif_by_region(q, ctx):
     ql = q.lower()
-    if "otif" not in ql:
+    if "otif" not in ql and "on time in full" not in ql:
         return None
     # Answer text claims "last complete quarter" -- actually filter to it,
     # rather than computing over the full history and mislabeling the result.
@@ -108,7 +108,7 @@ def t_price_gap(q, ctx):
 
 def t_freight_cost(q, ctx):
     ql = q.lower()
-    if "freight" not in ql or "case" not in ql:
+    if "case" not in ql or ("freight" not in ql and "cost per delivered" not in ql and "cost per case" not in ql):
         return None
     g = metrics.freight_cost_per_case(ctx["freight"], ctx["ol"], ctx["data"]["warehouses"])
     text = "Freight cost per delivered case, by warehouse and month:"

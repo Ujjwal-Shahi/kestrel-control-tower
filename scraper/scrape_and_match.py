@@ -208,7 +208,11 @@ def load_products():
     df = pd.read_sql("SELECT sku_code, brand, product_name, category, pack_size_value, "
                       "pack_size_uom, mrp_inr, status FROM products", conn)
     conn.close()
-    df["match_target"] = (df["brand"].fillna("") + " " + df["product_name"].fillna("")).str.strip()
+    # product_name already starts with brand in this catalog (e.g. "Hillfare
+    # Instant Noodles 1000g") -- prefixing brand again doubled the brand
+    # token and let brand-sharing false positives (e.g. two 1000g noodle
+    # SKUs from different brands) out-score the genuinely correct match.
+    df["match_target"] = df["product_name"].fillna("").str.strip()
     return df
 
 
@@ -230,10 +234,18 @@ def match_listings(listings, products):
         # and ~12% of scraped titles are ALL CAPS (e.g. "KESTREL SEL. JUICE
         # 200ML"), which without this scores ~50 against the catalog's normal
         # casing and silently fails every threshold.
+        # WRatio, not token_sort_ratio -- token_sort_ratio scored a same-pack,
+        # different-brand product HIGHER than the true match on a real listing
+        # ("AmritValley Inst. Noodles 1000g" matched to Hillfare's 1000g
+        # noodle SKU, not Amrit's, 71.4 vs 70.4) because it has no tolerance
+        # for the "AmritValley" vs "Amrit Valley" spacing difference between
+        # the site's titles and the catalog's names. WRatio blends several
+        # rapidfuzz algorithms (including partial-ratio) and separates the
+        # same pair correctly (92.3 vs 75.4 on this example).
         title_norm = row["title_clean"].lower()
         best_sku, best_score, best_row = None, -1, None
         for p in candidates:
-            score = fuzz.token_sort_ratio(title_norm, p["match_target"].lower())
+            score = fuzz.WRatio(title_norm, p["match_target"].lower())
             if score > best_score:
                 best_score, best_sku, best_row = score, p["sku_code"], p
 
@@ -242,9 +254,11 @@ def match_listings(listings, products):
         # is mathematically unreachable against any single "confidence >= 70"
         # cutoff. fallback_fuzzy has no pack-size corroboration, so it earns a
         # stricter raw-score bar (90) instead of a scaled-down one.
+        # Thresholds re-tuned for WRatio's distribution (observed floor on
+        # genuine exact_pack matches in this data: 87.9; median 100).
         confidence = best_score
         if method == "exact_pack":
-            matched = confidence >= 70
+            matched = confidence >= 75
         else:
             matched = confidence >= 90
         results.append({

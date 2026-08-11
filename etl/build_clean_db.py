@@ -8,6 +8,7 @@ Run: python etl/build_clean_db.py
 import sqlite3
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
@@ -151,7 +152,21 @@ def main():
 
     os.makedirs(os.path.dirname(config.CLEAN_DB_PATH), exist_ok=True)
     if os.path.exists(config.CLEAN_DB_PATH):
-        os.remove(config.CLEAN_DB_PATH)
+        # Windows refuses to delete a file another process has open -- if the
+        # dashboard is running against the old clean db, its sqlite handle
+        # can transiently hold the lock. Retry briefly instead of crashing.
+        for attempt in range(5):
+            try:
+                os.remove(config.CLEAN_DB_PATH)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise PermissionError(
+                        f"Could not replace {config.CLEAN_DB_PATH} -- it looks like something "
+                        "still has it open (e.g. a running `streamlit run app/app.py`). "
+                        "Stop that process and re-run this script."
+                    )
+                time.sleep(1)
     out = sqlite3.connect(config.CLEAN_DB_PATH)
 
     outlets.to_sql("dim_outlets", out, index=False)
