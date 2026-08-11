@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+data/kestrel_ops.db
+data/kestrel_clean.db
+data/csv/*.csv
+freight/cache/
+scraper/cache/
+.streamlit/secrets.toml
