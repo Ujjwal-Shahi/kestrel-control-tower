@@ -31,8 +31,13 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
 
 - **Fill rate in eaches**, per Rakesh's override of Divya's "cases" — more
   specific, more recent.
-- **Q1 = Apr-Jun 2026**, and happens to be the most recent complete
-  quarter in the data (ends 2026-06-30).
+- **"Last complete quarter" is derived from the data's own max date**
+  (`last_complete_fy_quarter()`), not hardcoded — currently resolves to
+  Apr-Jun 2026, which happens to be Q1, since the data ends 2026-06-30.
+- **Freight cost excludes DISPUTED invoices** (~20% of invoice value).
+  A contested charge isn't a settled cost; including it at face value
+  overstated cost/case by 58-97% per warehouse-month. PENDING is kept —
+  unpaid but undisputed is still a real, owed liability.
 - **OTIF "in full" = delivered vs allocated, not vs ordered.**
   `delivered_qty` never once reaches `ordered_qty` for any of 83,671
   orders (max ratio 99.4%, median ~86%) — an ordered-basis definition
@@ -50,8 +55,8 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
 - **Price matching uses literal `(pack_value, pack_uom)` equality**, not
   unit correction — Kestrel's own catalog has the same "400kg snack"
   anomalies and BazaarPulse reproduces them faithfully, so literal
-  matching is more correct than "fixing" units would be (~76% matched at
-  confidence ≥70).
+  matching is more correct than "fixing" units would be (91% matched;
+  per-method thresholds — 70 on exact pack, 90 on fuzzy-only fallback).
 - `/internal/margin-sheet.html` found, deliberately not scraped —
   `robots.txt` disallows it and it's irrelevant to the task.
 
