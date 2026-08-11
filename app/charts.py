@@ -9,9 +9,33 @@ the dataviz skill's color-formula: sequential = one hue for magnitude.
 import altair as alt
 
 BLUE = "#2a78d6"
+GOOD = "#0ca30c"
+CRITICAL = "#d03b3b"
 GRID = "#e1e0d9"
 AXIS = "#c3c2b7"
 MUTED = "#898781"
+
+LAKH = 100_000
+CRORE = 10_000_000
+
+
+def to_lakh(x):
+    return x / LAKH
+
+
+def to_crore(x):
+    return x / CRORE
+
+
+def fmt_inr_compact(value):
+    """Indian-unit compact string for a single INR value, for st.metric/markdown."""
+    if value is None:
+        return "n/a"
+    if abs(value) >= CRORE:
+        return f"Rs {value / CRORE:,.2f} Cr"
+    if abs(value) >= LAKH:
+        return f"Rs {value / LAKH:,.2f} L"
+    return f"Rs {value:,.0f}"
 
 _BASE_CONFIG = {
     "axis": {

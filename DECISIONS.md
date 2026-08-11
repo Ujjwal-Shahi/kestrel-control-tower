@@ -81,7 +81,12 @@ a schedule against live systems, not as a reviewer-run local script.
 
 ## Breaks first in production
 
-SQLite's single-writer lock and the in-memory pandas joins in
-`app/metrics.py` — fine at 820k rows, not 82M. Next: Postgres, scheduled
-materialized aggregates instead of per-page recompute, indexes matching
-actual filter columns.
+SQLite's single-writer lock and the in-memory pandas joins — fine at
+820k rows, not 82M. `st.tabs` also renders every tab's Python on every
+rerun regardless of which one is active, so any interaction anywhere
+recomputed every metric for every tab; fixed by caching on the cheap
+filter values (region/warehouse/channel/date), not on the dataframes,
+so an unchanged-filter rerun is a cache hit rather than a recompute.
+That holds at this scale; at 82M rows even the first hit per filter
+combination needs Postgres and scheduled materialized aggregates
+instead of per-page pandas recompute.

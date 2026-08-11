@@ -206,6 +206,8 @@ def price_position(price_matches, products, city=None):
     ).reset_index()
     lowest["gap_inr"] = (lowest["kestrel_mrp_inr"] - lowest["lowest_competitor_price_inr"]).round(2)
     lowest["gap_pct"] = (lowest["gap_inr"] / lowest["kestrel_mrp_inr"] * 100).round(1)
+    lowest = lowest.merge(products[["sku_code", "category"]], left_on="matched_sku_code",
+                           right_on="sku_code", how="left").drop(columns="sku_code")
     return lowest.sort_values("gap_pct")
 
 
