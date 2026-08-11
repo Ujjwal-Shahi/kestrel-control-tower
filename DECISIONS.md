@@ -1,0 +1,69 @@
+# Decisions
+
+## Built
+
+Streamlit control tower over the three shipped sources: ETL cleans the
+operational SQLite db, a BazaarPulse scraper/matcher, a freight API
+ingestion client, and six views (Overview with Q1 headline metrics,
+Service, Cold Chain, Money, Price Position, Ask Anything). Ask Anything is
+a deterministic NL-to-query mapper covering the brief's illustrative
+questions plus "why did fill rate drop in region X last week" — no LLM key
+needed anywhere. `python run.py` from a clean checkout is the one command.
+
+## Not built, on purpose
+
+- **Outlet entity resolution.** 161 groups (364 outlets) share a
+  (name, city) key — consistent with the ownership-transfer duplication
+  KP-2211 flags — but `legal_name`/GST aren't reliable disambiguators.
+  Flagged (`possible_duplicate`), not merged: wrong merges are worse than
+  visible duplicates.
+- **General text-to-SQL / LLM-agentic layer.** `ANTHROPIC_API_KEY` is a
+  wired extension point, not implemented — a non-deterministic layer that's
+  also the *only* path to an answer was the wrong trade for something
+  graded on a cold, unassisted checkout.
+- **Row-level freight-to-delivery join.** The mock API exposes no
+  `order_id`, only `warehouse_code`/`route_code`/date. Freight cost per
+  case is a warehouse-month aggregate of two independently summed series.
+- Auth, live refresh, Postgres migration, product-detail-page scraping
+  (adds only price history, unused by the price-gap ask).
+
+## Assumptions where the brief was unclear or self-contradicted
+
+- **Fill rate in eaches**, per Rakesh's override of Divya's "cases" — more
+  specific, more recent.
+- **Q1 = Apr-Jun 2026**, and happens to be the most recent complete
+  quarter in the data (ends 2026-06-30).
+- **OTIF "in full" = delivered vs allocated, not vs ordered.**
+  `delivered_qty` never once reaches `ordered_qty` for any of 83,671
+  orders (max ratio 99.4%, median ~86%) — an ordered-basis definition
+  reads ~0% everywhere and double-counts the same gap fill-rate already
+  reports. Even on allocated basis OTIF reads low (~2%); ranking across
+  warehouses/routes is usable now, the absolute number needs validating
+  with Ops.
+- **Cold-chain excursion derived from `max_temp_celsius > 8°C`**, not the
+  raw flag — the flag doesn't correlate with the reading (21% breach rate
+  flagged or not).
+- Test outlets excluded by `outlet_code` prefix `TST`; only two real city
+  spelling variants found (Bangalore/Bengaluru, New Delhi/Delhi).
+- **KP-2301 value mismatch not reproducible** — reconciles to zero across
+  all orders; treated as a stale doc entry, not built around.
+- **Price matching uses literal `(pack_value, pack_uom)` equality**, not
+  unit correction — Kestrel's own catalog has the same "400kg snack"
+  anomalies and BazaarPulse reproduces them faithfully, so literal
+  matching is more correct than "fixing" units would be (~76% matched at
+  confidence ≥70).
+- `/internal/margin-sheet.html` found, deliberately not scraped —
+  `robots.txt` disallows it and it's irrelevant to the task.
+
+## Next, with two more weeks
+
+Real outlet disambiguation (GPS/phone, not name/city); an order-level
+freight join if the API ever exposes one; regional-manager auth instead of
+an open filter; a real LLM upgrade with safe execution and citations.
+
+## Breaks first in production
+
+SQLite's single-writer lock and the in-memory pandas joins in
+`app/metrics.py` — fine at 820k rows, not 82M. Next: Postgres, scheduled
+materialized aggregates instead of per-page recompute, indexes matching
+actual filter columns.
