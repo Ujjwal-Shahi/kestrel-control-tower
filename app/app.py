@@ -1,6 +1,5 @@
 import os
 import sys
-import datetime as dt
 
 import pandas as pd
 import streamlit as st
@@ -12,9 +11,6 @@ import metrics
 import nl
 
 st.set_page_config(page_title="Kestrel Control Tower", layout="wide")
-
-FY_Q1_START = dt.datetime(2026, 4, 1)
-FY_Q1_END = dt.datetime(2026, 6, 30)
 
 
 def degrade_banner(status):
@@ -40,7 +36,9 @@ def build_ctx():
     price_matches = data.load_price_matches()
     ol = metrics.enrich_order_lines(d)
     dv = metrics.enrich_deliveries(d)
-    return {"data": d, "freight": freight, "price_matches": price_matches, "ol": ol, "dv": dv}
+    od = metrics.enrich_orders(d)
+    rt = metrics.enrich_returns(d)
+    return {"data": d, "freight": freight, "price_matches": price_matches, "ol": ol, "dv": dv, "od": od, "rt": rt}
 
 
 def sidebar_filters(ctx):
@@ -79,10 +77,16 @@ def apply_filters(df, region, warehouse, channel, date_range, date_col="order_da
     return out
 
 
-def overview_tab(ctx, ol, dv):
-    st.subheader("Q1 FY2026-27 (Apr-Jun 2026) -- the board asks about Q1 first")
-    q1_ol = ol[(ol["order_date"] >= FY_Q1_START) & (ol["order_date"] <= FY_Q1_END)]
-    q1_dv = dv[(dv["order_date"] >= FY_Q1_START) & (dv["order_date"] <= FY_Q1_END)]
+def overview_tab(ctx, ol, dv, od, rt):
+    # Quarter boundary derived from the data's own max date (unfiltered), not
+    # hardcoded -- stays correct if the db is later refreshed with more months.
+    q_start, q_end = metrics.last_complete_fy_quarter(ctx["ol"]["order_date"].max())
+    st.subheader(f"Q{((q_start.month - 4) % 12) // 3 + 1} FY -- {q_start:%b %Y} to {q_end:%b %Y} "
+                 f"(the board asks about Q1 first)")
+    q1_ol = ol[(ol["order_date"] >= q_start) & (ol["order_date"] <= q_end)]
+    q1_dv = dv[(dv["order_date"] >= q_start) & (dv["order_date"] <= q_end)]
+    q1_od = od[(od["order_date"] >= q_start) & (od["order_date"] <= q_end)]
+    q1_rt = rt[(rt["return_date"] >= q_start) & (rt["return_date"] <= q_end)]
 
     fr = metrics.fill_rate_eaches(q1_ol, ["region_name"])
     overall_fr = (q1_ol[q1_ol["order_status"].isin(metrics.FULFILLED_STATUSES) & q1_ol["is_reportable"]]
@@ -97,12 +101,10 @@ def overview_tab(ctx, ol, dv):
     exc_rate = round(exc["excursions"].sum() / exc["chilled_deliveries"].sum() * 100, 1) \
         if len(exc) and exc["chilled_deliveries"].sum() else None
 
-    ret_pct = metrics.returns_pct_of_dispatch(
-        ctx["data"]["returns"][(ctx["data"]["returns"]["return_date"] >= FY_Q1_START) &
-                                (ctx["data"]["returns"]["return_date"] <= FY_Q1_END)],
-        ctx["data"]["orders"][(ctx["data"]["orders"]["order_date"] >= FY_Q1_START) &
-                               (ctx["data"]["orders"]["order_date"] <= FY_Q1_END)],
-    )
+    # Same active filters (region/warehouse/channel/date range) as every other
+    # KPI on this page -- previously this ignored them and always summed the
+    # global returns/orders tables, so this number never moved with the filters.
+    ret_pct = metrics.returns_pct_of_dispatch(q1_rt, q1_od)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Case fill rate (eaches)", f"{overall_fr_pct}%" if overall_fr_pct is not None else "n/a")
@@ -132,7 +134,7 @@ def service_tab(ol, dv):
     st.dataframe(ot, use_container_width=True)
 
 
-def cold_chain_tab(ctx, dv):
+def cold_chain_tab(ctx, dv, rt):
     st.subheader("Cold chain")
     exc = metrics.cold_chain_excursions_by_month(dv)
     st.markdown("Temperature excursions per hundred chilled deliveries, by month")
@@ -148,13 +150,11 @@ def cold_chain_tab(ctx, dv):
     st.dataframe(near_expiry_by_wh[["warehouse_code", "on_hand_cases"]], use_container_width=True)
 
     st.markdown("Returns attributed to cold-chain breach (reason RT06_COLD_CHAIN_BREACH)")
-    cold_returns = ctx["data"]["returns"][
-        ctx["data"]["returns"]["return_reason_code"] == "RT06_COLD_CHAIN_BREACH"
-    ]
+    cold_returns = rt[rt["return_reason_code"] == "RT06_COLD_CHAIN_BREACH"]
     st.metric("Cold-chain-breach credit note value (INR)", f"{cold_returns['credit_note_value_inr'].sum():,.0f}")
 
 
-def money_tab(ctx, ol):
+def money_tab(ctx, ol, rt):
     st.subheader("Money")
     st.markdown("Freight cost per delivered case, by warehouse and month")
     if ctx["freight"].empty:
@@ -162,13 +162,14 @@ def money_tab(ctx, ol):
     else:
         fc = metrics.freight_cost_per_case(ctx["freight"], ol, ctx["data"]["warehouses"])
         st.dataframe(fc, use_container_width=True)
+        st.caption("Excludes DISPUTED invoices (contested, unsettled) -- see DECISIONS.md.")
 
         st.markdown("Freight spend by carrier")
         by_carrier = ctx["freight"].groupby("carrier_name")["amount_inr"].sum().sort_values(ascending=False)
         st.bar_chart(by_carrier)
 
     st.markdown("Returns leakage by category (value and leading reason)")
-    leak = metrics.returns_leakage_by_category(ctx["data"]["returns"], ol, ctx["data"]["products"])
+    leak = metrics.returns_leakage_by_category(rt, ctx["data"]["products"])
     st.dataframe(leak, use_container_width=True)
 
 
@@ -208,16 +209,18 @@ def main():
     region, warehouse, channel, date_range = sidebar_filters(ctx)
     ol = apply_filters(ctx["ol"], region, warehouse, channel, date_range, "order_date")
     dv = apply_filters(ctx["dv"], region, warehouse, channel, date_range, "order_date")
+    od = apply_filters(ctx["od"], region, warehouse, channel, date_range, "order_date")
+    rt = apply_filters(ctx["rt"], region, warehouse, channel, date_range, "return_date")
 
     tabs = st.tabs(["Overview", "Service", "Cold Chain", "Money", "Price Position", "Ask Anything"])
     with tabs[0]:
-        overview_tab(ctx, ol, dv)
+        overview_tab(ctx, ol, dv, od, rt)
     with tabs[1]:
         service_tab(ol, dv)
     with tabs[2]:
-        cold_chain_tab(ctx, dv)
+        cold_chain_tab(ctx, dv, rt)
     with tabs[3]:
-        money_tab(ctx, ol)
+        money_tab(ctx, ol, rt)
     with tabs[4]:
         price_tab(ctx)
     with tabs[5]:

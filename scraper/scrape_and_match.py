@@ -189,6 +189,14 @@ def crawl():
                     rows.append(row)
 
     df = pd.DataFrame(rows)
+    # The site's last page of a city occasionally repeats items from page 1
+    # (observed on Mumbai and Chennai) -- dedupe by listing_id, which is unique
+    # per listing regardless of which page it was crawled from.
+    before = len(df)
+    df = df.drop_duplicates(subset="listing_id", keep="first")
+    if before != len(df):
+        print(f"  dropped {before - len(df)} duplicate listing(s)")
+
     os.makedirs(os.path.dirname(config.RAW_LISTINGS_CACHE_PATH), exist_ok=True)
     df.to_csv(config.RAW_LISTINGS_CACHE_PATH, index=False)
     print(f"Scraped {len(df)} listings -> {config.RAW_LISTINGS_CACHE_PATH}")
@@ -218,14 +226,27 @@ def match_listings(listings, products):
             candidates = [p for _, p in products.iterrows()]
             method = "fallback_fuzzy"
 
+        # .lower() both sides -- rapidfuzz's token_sort_ratio is case-sensitive,
+        # and ~12% of scraped titles are ALL CAPS (e.g. "KESTREL SEL. JUICE
+        # 200ML"), which without this scores ~50 against the catalog's normal
+        # casing and silently fails every threshold.
+        title_norm = row["title_clean"].lower()
         best_sku, best_score, best_row = None, -1, None
         for p in candidates:
-            score = fuzz.token_sort_ratio(row["title_clean"], p["match_target"])
+            score = fuzz.token_sort_ratio(title_norm, p["match_target"].lower())
             if score > best_score:
                 best_score, best_sku, best_row = score, p["sku_code"], p
 
-        confidence = best_score if method == "exact_pack" else best_score * 0.6
-        matched = confidence >= 70
+        # Different acceptance bar per method, not a blanket score multiplier --
+        # a multiplier (best_score * 0.6) caps fallback confidence at 60, which
+        # is mathematically unreachable against any single "confidence >= 70"
+        # cutoff. fallback_fuzzy has no pack-size corroboration, so it earns a
+        # stricter raw-score bar (90) instead of a scaled-down one.
+        confidence = best_score
+        if method == "exact_pack":
+            matched = confidence >= 70
+        else:
+            matched = confidence >= 90
         results.append({
             **row.to_dict(),
             "matched_sku_code": best_sku if matched else None,

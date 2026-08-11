@@ -8,6 +8,19 @@ ON_TIME_GRACE_MINUTES = 0  # delay_minutes <= this counts as on-time
 LATE_THRESHOLD_MINUTES = 120  # ">2 hours late" per brief Q5
 
 
+def last_complete_fy_quarter(max_date):
+    """Kestrel's FY runs Apr-Mar (Q-MAR in pandas' fiscal-quarter convention).
+    Derived from the data's own max date, not hardcoded -- so 'Q1' on the
+    Overview tab and any NL answer that claims 'last complete quarter' stays
+    correct if the underlying db is ever refreshed with more months, instead
+    of silently freezing on today's dates. See DECISIONS.md."""
+    max_date = pd.Timestamp(max_date)
+    q = max_date.to_period(freq="Q-MAR")
+    if max_date < q.end_time.normalize():
+        q = q - 1
+    return q.start_time.normalize(), q.end_time.normalize()
+
+
 def enrich_order_lines(data):
     ol = data["order_lines"].merge(
         data["orders"][["order_id", "region_id", "warehouse_id", "route_id", "outlet_id", "order_status"]],
@@ -22,6 +35,22 @@ def enrich_order_lines(data):
         on="outlet_id", how="left",
     )
     return ol
+
+
+def enrich_orders(data):
+    o = data["orders"].merge(data["regions"][["region_id", "region_name"]], on="region_id", how="left")
+    o = o.merge(data["warehouses"][["warehouse_id", "warehouse_code"]], on="warehouse_id", how="left")
+    return o
+
+
+def enrich_returns(data):
+    r = data["returns"].merge(
+        data["orders"][["order_id", "region_id", "warehouse_id", "channel"]],
+        on="order_id", how="left",
+    )
+    r = r.merge(data["regions"][["region_id", "region_name"]], on="region_id", how="left")
+    r = r.merge(data["warehouses"][["warehouse_id", "warehouse_code"]], on="warehouse_id", how="left")
+    return r
 
 
 def enrich_deliveries(data):
@@ -109,7 +138,7 @@ def late_routes(deliveries, min_delivery_count=10):
     return g[g["very_late_rate_pct"] > 10].sort_values("very_late_rate_pct", ascending=False)
 
 
-def returns_leakage_by_category(returns, order_lines, products):
+def returns_leakage_by_category(returns, products):
     r = returns.merge(products[["product_id", "category"]], on="product_id", how="left")
     g = r.groupby("category").agg(
         credit_note_value_inr=("credit_note_value_inr", "sum"),
@@ -124,7 +153,7 @@ def returns_leakage_by_category(returns, order_lines, products):
     return g.sort_values("credit_note_value_inr", ascending=False)
 
 
-def returns_pct_of_dispatch(returns, orders, group_cols=None):
+def returns_pct_of_dispatch(returns, orders):
     dispatch_value = orders.loc[orders["order_status"].isin(FULFILLED_STATUSES), "order_value_net_inr"].sum()
     returns_value = returns["credit_note_value_inr"].sum()
     overall = round(returns_value / dispatch_value * 100, 2) if dispatch_value else None
@@ -134,8 +163,13 @@ def returns_pct_of_dispatch(returns, orders, group_cols=None):
 def freight_cost_per_case(freight, order_lines, warehouses, period_start=None, period_end=None):
     """Freight invoices carry no order-level key -- only warehouse_code/route_code/date
     (see DECISIONS.md). Cost per case is therefore a warehouse-month aggregate,
-    not a shipment-level join."""
-    f = freight.copy()
+    not a shipment-level join.
+
+    DISPUTED invoices (~20% of total invoice value) are excluded -- a contested
+    charge isn't a settled cost and including it at face value overstates
+    freight cost per case by 58-97% per warehouse-month. PENDING is kept:
+    unpaid is still an owed, undisputed liability."""
+    f = freight[freight["status"] != "DISPUTED"].copy()
     if period_start is not None:
         f = f[f["invoice_date"] >= period_start]
     if period_end is not None:
@@ -159,9 +193,13 @@ def freight_cost_per_case(freight, order_lines, warehouses, period_start=None, p
 
 
 def price_position(price_matches, products, city=None):
+    """city matches by case-insensitive substring, not exact equality -- the
+    scraped city labels come from the site's own link text (e.g. "Delhi NCR",
+    not "Delhi") and a caller passing the shorter conversational name should
+    still match. See DECISIONS.md."""
     pm = price_matches[price_matches["matched_sku_code"].notna()].copy()
     if city:
-        pm = pm[pm["city"] == city]
+        pm = pm[pm["city"].str.contains(city, case=False, na=False)]
     lowest = pm.groupby(["matched_sku_code", "city"]).agg(
         lowest_competitor_price_inr=("price_inr", "min"),
         kestrel_mrp_inr=("kestrel_mrp_inr", "first"),

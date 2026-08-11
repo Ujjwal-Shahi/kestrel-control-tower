@@ -61,7 +61,15 @@ def walk_invoices(session, date_from=None, date_to=None):
             params["from"] = date_from
         if date_to:
             params["to"] = date_to
-        r = request_with_backoff(session, f"{config.FREIGHT_API_BASE}/v1/freight_invoices", params)
+        try:
+            r = request_with_backoff(session, f"{config.FREIGHT_API_BASE}/v1/freight_invoices", params)
+        except RuntimeError as e:
+            # Retries exhausted on this page. Stop here and return what's been
+            # collected so far rather than losing the whole walk -- a partial
+            # result the caller can still write is better than an uncaught
+            # crash with nothing saved.
+            print(f"  giving up on page {page + 1} ({e}); returning {len(rows)} invoices collected so far")
+            break
         body = r.json()
         rows.extend(body["data"])
         page += 1
@@ -96,6 +104,17 @@ def main():
 
     print("Walking /v1/freight_invoices ...")
     raw = walk_invoices(session)
+
+    if not raw:
+        # First page failed outright -- nothing new to write. Keep whatever
+        # was cached from a previous successful run rather than overwriting
+        # it with an empty file.
+        if os.path.exists(config.FREIGHT_CACHE_PATH):
+            print("No invoices collected this run -- keeping existing cache untouched.")
+        else:
+            print("No invoices collected and no existing cache -- freight cost metrics will be empty.")
+        return
+
     df = pd.DataFrame(raw)
     df["amount_inr"] = df["amount"] / 100.0
     df["detention_charge_inr"] = df["detention_charge"] / 100.0
@@ -103,7 +122,8 @@ def main():
 
     os.makedirs(os.path.dirname(config.FREIGHT_CACHE_PATH), exist_ok=True)
     df.to_csv(config.FREIGHT_CACHE_PATH, index=False)
-    print(f"Wrote {len(df)} invoices -> {config.FREIGHT_CACHE_PATH}")
+    note = "" if len(df) >= 41500 else " (partial -- a page ran out of retries mid-walk, see log above)"
+    print(f"Wrote {len(df)} invoices -> {config.FREIGHT_CACHE_PATH}{note}")
 
 
 if __name__ == "__main__":

@@ -54,8 +54,13 @@ def t_otif_by_region(q, ctx):
     ql = q.lower()
     if "otif" not in ql:
         return None
-    g = metrics.otif(ctx["dv"], ctx["ol"], ["region_name"])
-    text = "OTIF by region, last complete quarter (Apr-Jun 2026):"
+    # Answer text claims "last complete quarter" -- actually filter to it,
+    # rather than computing over the full history and mislabeling the result.
+    q_start, q_end = metrics.last_complete_fy_quarter(ctx["ol"]["order_date"].max())
+    dv_q = ctx["dv"][(ctx["dv"]["order_date"] >= q_start) & (ctx["dv"]["order_date"] <= q_end)]
+    ol_q = ctx["ol"][(ctx["ol"]["order_date"] >= q_start) & (ctx["ol"]["order_date"] <= q_end)]
+    g = metrics.otif(dv_q, ol_q, ["region_name"])
+    text = f"OTIF by region, last complete quarter ({q_start:%b %Y} to {q_end:%b %Y}):"
     return text, g
 
 
@@ -63,7 +68,7 @@ def t_returns_category(q, ctx):
     ql = q.lower()
     if "return" not in ql or "categor" not in ql and "reason" not in ql:
         return None
-    g = metrics.returns_leakage_by_category(ctx["data"]["returns"], ctx["ol"], ctx["data"]["products"])
+    g = metrics.returns_leakage_by_category(ctx["data"]["returns"], ctx["data"]["products"])
     text = "Return value by category, with leading reason code:"
     return text, g
 
@@ -90,12 +95,13 @@ def t_price_gap(q, ctx):
     ql = q.lower()
     if "mrp" not in ql and "competitor" not in ql and "price" not in ql:
         return None
+    # city_word ("delhi") deliberately not .title()-cased into a display name here --
+    # the scraped data's actual city string is "Delhi NCR" (from the site's own link
+    # text), not "Delhi". price_position() matches by substring, case-insensitive,
+    # so the raw keyword is the right thing to pass through.
     city_word = _find_one(CITIES, ql)
-    city = city_word.title() if city_word else None
-    if city == "Bengaluru":
-        city = "Bengaluru"
-    g = metrics.price_position(ctx["price_matches"], ctx["data"]["products"], city=city)
-    label = city or "all scraped cities"
+    g = metrics.price_position(ctx["price_matches"], ctx["data"]["products"], city=city_word)
+    label = city_word.title() if city_word else "all scraped cities"
     text = f"MRP vs lowest observed competitor price ({label}), most competitively exposed first:"
     return text, g.head(20)
 
