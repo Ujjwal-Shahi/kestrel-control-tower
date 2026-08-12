@@ -13,47 +13,44 @@ import charts
 
 st.set_page_config(page_title="Kestrel Control Tower", layout="wide", page_icon="\U0001F4E6")
 
-# One accent hue (the dataviz skill's own dark-mode blue, same one the charts
-# use) applied as a soft glow on hover -- restrained on purpose. "Futuristic"
-# here means dark surface + one consistent accent, not five competing effects.
+# ONE accent hue, no second gradient color, no outer glow -- per taste-skill's
+# LILA RULE (no default "AI purple/blue glow") and Section 9.A ("no neon /
+# outer glows -- use inner borders or subtle tinted shadows instead"). The
+# first pass here used a blue-to-violet gradient title and a blurred outer
+# glow on hover -- both are the exact patterns that rule exists to catch.
 _CUSTOM_CSS = """
 <style>
 :root {
     --kt-accent: #3987e5;
-    --kt-accent-2: #7c5cff;
-    --kt-glow: rgba(57, 135, 229, 0.35);
+    --kt-accent-tint: rgba(57, 135, 229, 0.14);
 }
 
 h1 {
-    background: linear-gradient(90deg, var(--kt-accent), var(--kt-accent-2));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--kt-accent);
     letter-spacing: -0.02em;
 }
 
 div[data-testid="stMetric"] {
-    background: linear-gradient(160deg, rgba(57,135,229,0.10), rgba(124,92,255,0.03));
+    background: var(--kt-accent-tint);
     border: 1px solid rgba(57,135,229,0.20);
     border-radius: 14px;
     padding: 14px 16px 10px 16px;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 div[data-testid="stMetric"]:hover {
     border-color: rgba(57,135,229,0.55);
-    box-shadow: 0 0 22px var(--kt-glow);
-    transform: translateY(-2px);
+    box-shadow: inset 0 1px 0 rgba(57,135,229,0.25);
 }
 
 button[data-testid="stBaseButton-secondary"],
 button[data-testid="stBaseButton-primaryFormSubmit"] {
     border-radius: 10px !important;
-    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    transition: border-color 0.2s ease, background 0.2s ease;
 }
 button[data-testid="stBaseButton-secondary"]:hover,
 button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
-    box-shadow: 0 0 16px var(--kt-glow);
     border-color: var(--kt-accent) !important;
+    background: var(--kt-accent-tint);
 }
 
 div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -298,14 +295,14 @@ def overview_tab(region, warehouse, channel, date_range):
     ret_prior = cached_returns_pct(region, warehouse, channel, date_range, prior_start, prior_end)
 
     kpis = [
-        ("\U0001F4E6 Case fill rate (eaches)", fr_val, fr_prior, True, "%", None),
-        ("\U0001F69A OTIF", otif_val, otif_prior, True, "%",
+        ("Case fill rate (eaches)", fr_val, fr_prior, True, "%", None),
+        ("OTIF", otif_val, otif_prior, True, "%",
          "Strict definition: any delay at all counts as late (no grace window), and "
          "'in full' compares delivered to allocated stock, not to what was originally "
          "ordered -- so this reads much lower than fill rate on the same orders. "
          "That's expected under this definition, not a data error -- see DECISIONS.md."),
-        ("❄️ Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, "", None),
-        ("\U0001F4B8 Returns as % of dispatch value", ret_val, ret_prior, False, "%", None),
+        ("Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, "", None),
+        ("Returns as % of dispatch value", ret_val, ret_prior, False, "%", None),
     ]
     cols = st.columns(4)
     for col, (label, val, prior, higher_better, unit, help_text) in zip(cols, kpis):
@@ -471,7 +468,7 @@ def ask_tab(ctx):
             q_input = st.text_input("Search or ask a question", value=st.session_state["ask_question"],
                                      placeholder="e.g. why did fill rate drop in the West last week",
                                      label_visibility="collapsed")
-            submitted = st.form_submit_button("\U0001F50D Ask", use_container_width=True, type="primary")
+            submitted = st.form_submit_button("Ask", use_container_width=True, type="primary")
         if submitted:
             st.session_state["ask_question"] = q_input
 
@@ -495,8 +492,7 @@ def main():
     ctx = build_ctx()
     region, warehouse, channel, date_range = sidebar_filters(ctx)
 
-    tabs = st.tabs(["\U0001F4CA Overview", "\U0001F69A Service", "❄️ Cold Chain",
-                     "\U0001F4B0 Money", "\U0001F3F7️ Price Position", "\U0001F50D Ask Anything"])
+    tabs = st.tabs(["Overview", "Service", "Cold Chain", "Money", "Price Position", "Ask Anything"])
     with tabs[0]:
         overview_tab(region, warehouse, channel, date_range)
     with tabs[1]:

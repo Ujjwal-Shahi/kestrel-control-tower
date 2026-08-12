@@ -70,7 +70,16 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
   `robots.txt` disallows it and it's irrelevant to the task.
 - **Visual design** (dark theme, single accent hue, chart conventions)
   follows the `dataviz` skill's palette and mark specs — see README's
-  "Design system" section rather than repeating it here.
+  "Design system" section rather than repeating it here. A later pass
+  through `design-taste-frontend` (a React/Tailwind landing-page taste
+  skill, whose own docs say it's not built for dashboards) still
+  surfaced a real correction applicable to any stack: the blue-to-violet
+  title gradient and blurred outer-glow hover effect were exactly the
+  "AI purple/blue glow" cliche its anti-pattern rules name, and the
+  emoji in every tab/KPI label were decorative rather than functional.
+  Removed the second accent color and outer glow (inner border/tint
+  only now), removed the emoji. Used the skill's taste judgment, not
+  its React/GSAP mechanics, which don't apply to a Streamlit app.
 - **Charts use a fixed pixel width, not Streamlit's `use_container_width`
   responsive sizing.** That path depends on Vega-Embed's ResizeObserver
   correctly measuring the wrapper element; at a fractional
