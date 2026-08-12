@@ -400,7 +400,7 @@ def cached_returns_pct(region, warehouse, channel, date_range, q_start=None, q_e
     if q_start is not None:
         rt = rt[(rt["return_date"] >= q_start) & (rt["return_date"] <= q_end)]
         od = od[(od["order_date"] >= q_start) & (od["order_date"] <= q_end)]
-    return metrics.returns_pct_of_dispatch(rt, od)
+    return metrics.returns_pct_of_dispatch_bps(rt, od)
 
 
 @st.cache_data(show_spinner=False)
@@ -431,7 +431,8 @@ def cached_returns_leakage(region, warehouse, channel, date_range):
 def cached_cold_chain_breach_value(region, warehouse, channel, date_range):
     ctx = build_ctx()
     rt = _filtered(ctx, "rt", region, warehouse, channel, date_range)
-    return rt.loc[rt["return_reason_code"] == "RT06_COLD_CHAIN_BREACH", "credit_note_value_inr"].sum()
+    st_rt = metrics.settled_returns(rt)
+    return st_rt.loc[st_rt["return_reason_code"] == "RT06_COLD_CHAIN_BREACH", "credit_note_value_inr"].sum()
 
 
 @st.cache_data(show_spinner=False)
@@ -537,9 +538,12 @@ def overview_tab(region, warehouse, channel, date_range):
         ("Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, "",
          "Chilled deliveries with a recorded max temperature above 8 degrees C, per "
          "100 chilled deliveries that month. Lower is better."),
-        ("Returns as % of dispatch value", ret_val, ret_prior, False, "%",
-         "Credit-note value from returns as a percentage of dispatched order value "
-         "in the same period."),
+        ("Returns vs dispatch value", ret_val, ret_prior, False, " bps",
+         "Settled credit-note value as a share of dispatched order value in the same "
+         "period, in basis points (100 bps = 1%). Shown in bps because the true figure "
+         "is ~3.4 bps -- as a one-decimal percentage it renders as '0.0%', which reads "
+         "as a broken metric rather than a small one. REJECTED credit notes are excluded: "
+         "a refused claim was defended, not leaked -- see DECISIONS.md."),
     ]
     cols = st.columns(4)
     for col, (label, val, prior, higher_better, unit, help_text) in zip(cols, kpis):
@@ -653,6 +657,8 @@ def money_tab(region, warehouse, channel, date_range):
         },
         key="money_returns_leakage",
     )
+    st.caption("Excludes REJECTED credit notes (26% of raw credit-note value) -- a refused "
+               "claim was defended, not leaked. Same treatment as DISPUTED freight above.")
 
 
 def price_tab(ctx):
