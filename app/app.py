@@ -575,6 +575,28 @@ def overview_tab(region, warehouse, channel, date_range):
         st.altair_chart(charts.bar(fr, "region_name", "fill_rate_pct", "Region", "Fill rate %", height=260, width=500))
     with st.expander("View region chart as table"):
         tables.paginated_table(fr, formats={"fill_rate_pct": (None, "%.1f%%")}, key="overview_region_table")
+    _spread_note(fr, "fill_rate_pct", "region")
+
+
+def _spread_note(df, col, grain_label):
+    """States plainly when a 'worst performers' ranking has no material spread.
+
+    Fill rate in this dataset sits at ~85.6% across every region, warehouse and
+    channel -- total spread under 0.2pp. Sorting that ascending and calling the
+    top row a worst performer presents rounding noise as a finding, which is
+    the opposite of what a control tower is for. Computed live rather than
+    hardcoded, so it disappears on its own if real dispersion ever appears.
+    """
+    if df.empty or col not in df.columns or df[col].notna().sum() < 2:
+        return
+    spread = float(df[col].max() - df[col].min())
+    if spread < 1.0:
+        st.caption(
+            f":warning: Spread across {grain_label} is only {spread:.2f} percentage points "
+            f"({df[col].min():.1f}%-{df[col].max():.1f}%). This ranking is ordering noise, not "
+            f"performance -- no {grain_label} is materially worse than another. The finding is "
+            f"the uniform level itself, not the order."
+        )
 
 
 def service_tab(region, warehouse, channel, date_range):
@@ -594,6 +616,7 @@ def service_tab(region, warehouse, channel, date_range):
 
     st.markdown("Worst performers first (case fill rate, eaches)")
     tables.paginated_table(fr, formats={"fill_rate_pct": (None, "%.1f%%")}, key=f"service_fill_rate_{grain}")
+    _spread_note(fr, "fill_rate_pct", GRAIN_LABELS[grain].lower())
 
     st.markdown("OTIF, worst performers first")
     tables.paginated_table(ot, formats={"otif_pct": (None, "%.1f%%")}, key=f"service_otif_{grain}")

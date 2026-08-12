@@ -87,7 +87,15 @@ def t_late_routes(q, ctx):
     if "late" not in ql or "route" not in ql:
         return None
     g = metrics.late_routes(ctx["dv"])
+    total_routes = ctx["dv"]["route_code"].nunique()
     text = "Routes more than two hours late on more than 1-in-10 deliveries:"
+    if total_routes and len(g) >= total_routes:
+        # Every route in the network clears this bar, so the list is not a
+        # shortlist -- saying so is the actual answer. Reporting 140 rows as
+        # "the problem routes" would imply the other routes are fine.
+        text = (f"All {len(g)} of {total_routes} routes breach this bar -- lateness is "
+                f"network-wide, not route-specific, so this is not a shortlist to action. "
+                f"Worst rates first:")
     return text, g
 
 
