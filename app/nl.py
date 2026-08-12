@@ -35,6 +35,55 @@ def _region_filter(df, region_word, col="region_name"):
     return df[df[col].str.lower() == region_word]
 
 
+MISSING_PRICE_DATA = (
+    "Competitor price data hasn't been loaded yet, so I can't answer price questions. "
+    "Serve the site (`cd bazaarpulse_site && python -m http.server 8080`) then run "
+    "`python -m scraper.scrape_and_match`, and ask again. See the README."
+)
+MISSING_FREIGHT_DATA = (
+    "Freight invoice data hasn't been loaded yet, so I can't answer freight-cost questions. "
+    "Start the API (`python partner_api/server.py`) then run `python -m freight.ingest`, "
+    "and ask again. See the README."
+)
+
+
+def _has_price(ctx):
+    pm = ctx.get("price_matches")
+    return pm is not None and not pm.empty and "matched_sku_code" in pm.columns
+
+
+def _has_freight(ctx):
+    f = ctx.get("freight")
+    return f is not None and not f.empty and "status" in f.columns
+
+
+def _window(q, ctx):
+    """Resolves a date scope the question actually asked for.
+
+    The brief's own questions say "last month" (Q1) and "for the last quarter"
+    (Q7). Answering those over all 18 months and labelling it as if scoped
+    would be quietly wrong, so the scope is parsed and stated back in the
+    answer text. Anchored on the data's max date, not today's, since the db is
+    a fixed 18-month extract.
+    """
+    ql = q.lower()
+    max_date = ctx["ol"]["order_date"].max()
+    if "last month" in ql or "past month" in ql:
+        end = (max_date.replace(day=1) - pd.Timedelta(days=1))
+        start = end.replace(day=1)
+        return start.normalize(), end.normalize(), f"{start:%b %Y}"
+    if "quarter" in ql:
+        start, end = metrics.last_complete_fy_quarter(max_date)
+        return start, end, f"{start:%b %Y} to {end:%b %Y}"
+    return None, None, None
+
+
+def _scope(df, start, end, col="order_date"):
+    if start is None or df is None or df.empty:
+        return df
+    return df[(df[col] >= start) & (df[col] <= end)]
+
+
 # ---- templates ----
 
 def t_lowest_fill_rate(q, ctx):
@@ -44,9 +93,12 @@ def t_lowest_fill_rate(q, ctx):
     m = re.search(r"\b(\d+)\b", q)
     if m:
         n = int(m.group(1))
-    g = metrics.fill_rate_eaches(ctx["ol"], ["outlet_name"])
+    start, end, label = _window(q, ctx)
+    g = metrics.fill_rate_eaches(_scope(ctx["ol"], start, end), ["outlet_name"])
     g = g[g["ordered_eaches"] > 0].head(n)
-    text = f"{n} lowest case fill rate outlets (measured in eaches, reportable outlets only):"
+    scope_txt = f" in {label}" if label else " across all 18 months of data"
+    text = (f"{n} lowest case fill rate outlets{scope_txt} (measured in eaches; closed, "
+            f"deleted and test outlets excluded):")
     return text, g
 
 
@@ -107,9 +159,31 @@ def t_price_gap(q, ctx):
     # the scraped data's actual city string is "Delhi NCR" (from the site's own link
     # text), not "Delhi". price_position() matches by substring, case-insensitive,
     # so the raw keyword is the right thing to pass through.
+    if not _has_price(ctx):
+        return MISSING_PRICE_DATA, None
     city_word = _find_one(CITIES, ql)
     g = metrics.price_position(ctx["price_matches"], ctx["data"]["products"], city=city_word)
     label = city_word.title() if city_word else "all scraped cities"
+
+    # "our top twenty SKUs by value" (brief Q6) is a SALES-VALUE ranking, not
+    # the most price-exposed SKUs. Answering the latter and calling it the
+    # former would be a different question with a plausible-looking answer, so
+    # the value ranking is applied when the question asks for it, and coverage
+    # is reported because not every top-value SKU is sold by a scraped retailer.
+    m = re.search(r"top\s+(\d+|twenty|ten|five)", ql)
+    if m and ("value" in ql or "sku" in ql):
+        words = {"twenty": 20, "ten": 10, "five": 5}
+        n = words.get(m.group(1), None) or int(m.group(1))
+        top = metrics.top_skus_by_value(ctx["ol"], n)
+        g = g[g["matched_sku_code"].isin(top["sku_code"])]
+        g = g.merge(top, left_on="matched_sku_code", right_on="sku_code",
+                    how="left").drop(columns="sku_code")
+        g = g.sort_values("shipped_value_inr", ascending=False)
+        text = (f"Top {n} SKUs by shipped value vs the lowest observed competitor price "
+                f"({label}). {len(g)} of the top {n} are stocked by a scraped retailer there; "
+                f"the rest have no competitor observation to compare against:")
+        return text, g
+
     text = f"MRP vs lowest observed competitor price ({label}), most competitively exposed first:"
     return text, g.head(20)
 
@@ -118,8 +192,13 @@ def t_freight_cost(q, ctx):
     ql = q.lower()
     if "case" not in ql or ("freight" not in ql and "cost per delivered" not in ql and "cost per case" not in ql):
         return None
-    g = metrics.freight_cost_per_case(ctx["freight"], ctx["ol"], ctx["data"]["warehouses"])
-    text = "Freight cost per delivered case, by warehouse and month:"
+    if not _has_freight(ctx):
+        return MISSING_FREIGHT_DATA, None
+    start, end, label = _window(q, ctx)
+    g = metrics.freight_cost_per_case(ctx["freight"], ctx["ol"], ctx["data"]["warehouses"],
+                                      period_start=start, period_end=end)
+    scope_txt = f", {label}" if label else ""
+    text = f"Freight cost per delivered case, by warehouse and month{scope_txt}:"
     return text, g
 
 
@@ -177,14 +256,14 @@ TEMPLATES = [
 ]
 
 CAPABILITIES = """I answer from a fixed set of question shapes (no LLM key needed):
-- "which outlets had the lowest fill rate" / "worst N outlets by fill rate"
+- "which outlets had the lowest fill rate" / "worst N outlets by fill rate" (add "last month" to scope it)
 - "what was OTIF by region"
 - "which categories drive the most returns" / "leading reason code"
 - "temperature excursions per month"
 - "which routes are late more than 1 in 10 deliveries"
-- "freight cost per case by warehouse"
+- "freight cost per case by warehouse" (add "last quarter" to scope it)
 - "which outlets ordered a discontinued SKU"
-- "MRP vs competitor price in <city>"
+- "MRP vs competitor price in <city>" / "top 20 SKUs by value vs competitors in <city>"
 - "why did fill rate drop in <region> last week"
 
 Set ANTHROPIC_API_KEY to unlock free-form questions beyond this list."""

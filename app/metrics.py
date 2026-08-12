@@ -197,6 +197,10 @@ def freight_cost_per_case(freight, order_lines, warehouses, period_start=None, p
     charge isn't a settled cost and including it at face value overstates
     freight cost per case by 58-97% per warehouse-month. PENDING is kept:
     unpaid is still an owed, undisputed liability."""
+    cols = ["warehouse_code", "month", "amount_inr", "delivered_cases_equiv",
+            "freight_cost_per_case_inr"]
+    if freight is None or freight.empty or "status" not in freight.columns:
+        return pd.DataFrame(columns=cols)
     f = freight[freight["status"] != "DISPUTED"].copy()
     if period_start is not None:
         f = f[f["invoice_date"] >= period_start]
@@ -220,11 +224,27 @@ def freight_cost_per_case(freight, order_lines, warehouses, period_start=None, p
     return merged.sort_values(["warehouse_code", "month"])
 
 
+def top_skus_by_value(order_lines, n=20):
+    """Top n SKUs by shipped value -- the brief's Q6 asks about 'our top twenty
+    SKUs by value', which is a sales-value ranking, not the most price-exposed
+    SKUs. Ranked on line value for fulfilled orders so it reflects what actually
+    shipped rather than what was booked."""
+    ol = order_lines[order_lines["order_status"].isin(FULFILLED_STATUSES)]
+    g = (ol.groupby("sku_code")["line_value_inr"].sum()
+         .sort_values(ascending=False).head(n).reset_index())
+    g.columns = ["sku_code", "shipped_value_inr"]
+    return g
+
+
 def price_position(price_matches, products, city=None):
     """city matches by case-insensitive substring, not exact equality -- the
     scraped city labels come from the site's own link text (e.g. "Delhi NCR",
     not "Delhi") and a caller passing the shorter conversational name should
     still match. See DECISIONS.md."""
+    cols = ["matched_sku_code", "city", "lowest_competitor_price_inr", "kestrel_mrp_inr",
+            "gap_inr", "gap_pct", "category"]
+    if price_matches is None or price_matches.empty or "matched_sku_code" not in price_matches.columns:
+        return pd.DataFrame(columns=cols)
     pm = price_matches[price_matches["matched_sku_code"].notna()].copy()
     if city:
         pm = pm[pm["city"].str.contains(city, case=False, na=False)]
