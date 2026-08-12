@@ -30,30 +30,85 @@ _CUSTOM_CSS = """
 h1 {
     color: var(--kt-accent);
     letter-spacing: -0.02em;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
+/* Section subheaders ("Cold chain", "Money", the Overview quarter line, ...)
+   get a left accent bar instead of relying on size/weight alone to mark
+   "a new section starts here" -- the same accent used everywhere else,
+   not a second color, per the color-consistency lock. */
+h3 {
+    border-left: 3px solid var(--kt-accent);
+    padding-left: 12px;
+    letter-spacing: -0.01em;
+}
+
+/* KPI cards: a top accent stripe (the "dashboard tile" convention BI tools
+   use -- Grafana, Looker, Datadog) plus tabular-nums on the headline number
+   so 85.6% and 100.0% occupy the same visual width. Shape-lock exception,
+   documented: cards are 14px, this stripe follows the card's own radius at
+   the two top corners only, not a second radius scale. */
 div[data-testid="stMetric"] {
+    position: relative;
     background: var(--kt-accent-tint);
     border: 1px solid rgba(57,135,229,0.20);
     border-radius: 14px;
-    padding: 14px 16px 10px 16px;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    padding: 18px 16px 10px 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    overflow: hidden;
+}
+div[data-testid="stMetric"]::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--kt-accent);
+    opacity: 0.55;
 }
 div[data-testid="stMetric"]:hover {
     border-color: rgba(57,135,229,0.55);
     box-shadow: inset 0 1px 0 rgba(57,135,229,0.25);
+    transform: translateY(-1px);
+}
+div[data-testid="stMetricValue"] {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
 }
 
 button[data-testid="stBaseButton-secondary"],
 button[data-testid="stBaseButton-primaryFormSubmit"] {
     border-radius: 10px !important;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    transition: border-color 0.2s ease, background 0.2s ease, transform 0.1s ease;
 }
 button[data-testid="stBaseButton-secondary"]:hover,
 button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
     border-color: var(--kt-accent) !important;
     background: var(--kt-accent-tint);
 }
+/* Tactile feedback on click (skill's Section 4.5) -- a real physical-press
+   cue, not decoration, so it's gated to :active only. */
+button[data-testid="stBaseButton-secondary"]:active,
+button[data-testid="stBaseButton-primaryFormSubmit"]:active {
+    transform: translateY(1px) scale(0.98);
+}
+
+/* Status badges (Overview KPI trend chips) -- was plain colored text via
+   Streamlit's :green[]/:red[] markdown shortcode, upgraded to a tinted pill
+   to match the rest of the app's chip/card language instead of being the
+   one plain-text element on the page. Pill radius is the shape-lock's
+   documented interactive-chip exception (see DECISIONS.md). */
+.kt-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+.kt-badge-good { background: rgba(63,185,80,0.16); color: #3fb950; }
+.kt-badge-bad { background: rgba(248,81,73,0.16); color: #f85149; }
+.kt-badge-flat { background: rgba(154,154,154,0.16); color: #9a9a9a; }
 
 div[data-testid="stVerticalBlockBorderWrapper"] {
     border-radius: 16px !important;
@@ -113,6 +168,12 @@ div[data-testid="stTable"] td {
 
 section[data-testid="stSidebar"] {
     border-right: 1px solid rgba(57,135,229,0.15);
+    background: rgba(255,255,255,0.015);
+}
+section[data-testid="stSidebar"] h2 {
+    border-left: 3px solid var(--kt-accent);
+    padding-left: 10px;
+    font-size: 1.05rem;
 }
 
 /* Tab switch feedback -- motivated by Section 5's own rule (motion needs a
@@ -129,6 +190,19 @@ section[data-testid="stSidebar"] {
 button[data-testid="stTab"] {
     transition: color 0.15s ease;
 }
+/* KNOWN, NOT FIXED: Streamlit's own tab component colors the active tab
+   with a hardcoded #ff4b4b (Streamlit's stock brand red) via an
+   emotion-generated class, not the theme's primaryColor -- confirmed live,
+   present even before any custom CSS, breaking the color-consistency lock
+   in a small way. Tried overriding with an !important attribute selector;
+   live-testing showed the override interacting unpredictably with
+   Streamlit's own focus/selection-state classes (the color shown after a
+   tab switch didn't reliably match either the override or Streamlit's
+   default, across repeated tests). Reverted rather than ship a change that
+   couldn't be verified correct -- this environment's Browser pane isn't
+   compositing frames this session, so no visual screenshot to confirm
+   against. Cosmetic only (one tab's text color); not worth shipping
+   unverified over. Revisit with real screenshot capability available. */
 </style>
 """
 
@@ -404,13 +478,17 @@ def _delta(current, prior, higher_is_better=True):
 
 
 def _status_badge(delta_value, higher_is_better):
-    """Icon + label, never colour alone (dataviz skill's status-colour rule)."""
+    """Icon + label, never colour alone (dataviz skill's status-colour rule).
+    Renders as a tinted pill (see .kt-badge* in _CUSTOM_CSS) instead of
+    Streamlit's plain-text :green[]/:red[] markdown shortcode."""
     if delta_value is None:
         return ""
     good = (delta_value > 0) if higher_is_better else (delta_value < 0)
     if abs(delta_value) < 0.3:
-        return ":gray[– Flat]"
-    return ":green[▲ Improving]" if good else ":red[▼ Worsening]"
+        return '<span class="kt-badge kt-badge-flat">– Flat</span>'
+    if good:
+        return '<span class="kt-badge kt-badge-good">▲ Improving</span>'
+    return '<span class="kt-badge kt-badge-bad">▼ Worsening</span>'
 
 
 def overview_tab(region, warehouse, channel, date_range):
@@ -468,7 +546,7 @@ def overview_tab(region, warehouse, channel, date_range):
         d, dc = _delta(val, prior, higher_better)
         col.metric(label, f"{val}{unit}" if val is not None else "n/a", delta=d, delta_color=dc, help=help_text)
         delta_raw = None if (val is None or prior is None) else round(val - prior, 1)
-        col.markdown(_status_badge(delta_raw, higher_better))
+        col.markdown(_status_badge(delta_raw, higher_better), unsafe_allow_html=True)
     st.caption(f"vs prior quarter ({prior_start:%b %Y} to {prior_end:%b %Y}). "
                "Status reflects direction of travel, not an absolute target.")
 

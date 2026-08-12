@@ -227,6 +227,38 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
     by testing the *deployed* code, not just re-reading it, per this
     project's practice of catching UX bugs through live use, not
     read-through.
+- **Fifth pass, a deliberate visual "revamp" (user's explicit ask, scoped
+  to CSS-level polish within Streamlit's native layout, not a structural
+  rebuild) leaning toward a sharper enterprise-analytics feel** given the
+  audience (regional ops managers, a B2B supply-chain tool, not a
+  consumer product). Shipped: a left accent bar on every section
+  subheader (a real hierarchy signal beyond bold text), a top accent
+  stripe on KPI cards (the Grafana/Looker "dashboard tile" convention),
+  tabular-nums on KPI numbers and table cells so digits align, KPI
+  trend indicators upgraded from Streamlit's plain-text `:green[]/:red[]`
+  markdown shortcode to a tinted pill matching the rest of the app's
+  chip language, a subtle sidebar background tint plus an accent bar on
+  its "Filters" header for consistency with the subheader treatment, and
+  `:active` tactile feedback (a slight press-down transform) on buttons.
+  All confirmed live via computed-style checks, not just re-reading the
+  CSS.
+  - **Tried and reverted**: an `!important` rule to recolor the active
+    tab from Streamlit's hardcoded `#ff4b4b` (confirmed live to be a
+    real, if minor, deviation from the theme's `primaryColor` -- present
+    even with zero custom CSS) to the app's own accent. Live-testing
+    across repeated tab switches showed the override interacting
+    unpredictably with Streamlit's own tab-selection styling: the
+    rendered color after a switch didn't reliably match either the
+    override or Streamlit's default. Root-caused as far as findable
+    without a working screenshot (this session's Browser pane wasn't
+    compositing frames throughout), but not with full certainty.
+    Reverted rather than ship a change that couldn't be verified
+    correct -- a wrong-tab-highlighted page would be a worse bug than
+    the cosmetic one it was meant to fix. Every other rule in this pass
+    was confirmed to hold correctly across tab switches, so this is
+    specific to however Streamlit's tab component manages its own
+    selection-color state, not a problem with the CSS injection
+    mechanism itself.
 
 ## Next, with two more weeks
 
