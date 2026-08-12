@@ -3,6 +3,7 @@ import sys
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -93,6 +94,26 @@ button[data-testid="stTab"] {
 </style>
 """
 
+# The sidebar's reopen control (only visible once the sidebar auto-collapses
+# on narrow viewports -- the sole path to Region/Warehouse/Channel/Date on
+# mobile) ships with an explicit empty aria-label and an aria-hidden icon, so
+# a screen-reader user gets an unnamed button. It's Streamlit chrome, not app
+# markup, so there's no Python-level prop for it; a components.html iframe
+# reaching into the parent DOM is the only way to patch it. Re-applied via
+# MutationObserver since Streamlit re-renders this control on every rerun.
+_SIDEBAR_LABEL_FIX = """
+<script>
+function ktLabelSidebarToggle() {
+    const btn = window.parent.document.querySelector(
+        '[data-testid="stSidebarCollapsedControl"] button');
+    if (btn) btn.setAttribute('aria-label', 'Open filters sidebar');
+}
+ktLabelSidebarToggle();
+new MutationObserver(ktLabelSidebarToggle)
+    .observe(window.parent.document.body, {childList: true, subtree: true});
+</script>
+"""
+
 
 def degrade_banner(status):
     if not status["clean_db"]:
@@ -155,6 +176,26 @@ def load_data_with_status():
     return ctx
 
 
+# Raw trade-channel codes from the source system, kept as the underlying
+# filter value (matches column values, cache keys, and CSV exports) but
+# shown with a plain-English label -- a first-time-user audit found "GT",
+# "MT", "HORECA", "ECOM_DARKSTORE" meant nothing without FMCG domain context.
+CHANNEL_LABELS = {
+    "All": "All",
+    "GT": "GT (General Trade)",
+    "MT": "MT (Modern Trade)",
+    "HORECA": "HORECA (Hotel/Restaurant/Cafe)",
+    "ECOM_DARKSTORE": "E-commerce dark store",
+}
+
+GRAIN_LABELS = {
+    "region_name": "Region",
+    "warehouse_code": "Warehouse",
+    "route_code": "Route",
+    "outlet_name": "Outlet",
+}
+
+
 def sidebar_filters(ctx):
     st.sidebar.header("Filters")
     regions = ["All"] + sorted(ctx["data"]["regions"]["region_name"].dropna().unique().tolist())
@@ -166,7 +207,8 @@ def sidebar_filters(ctx):
         wh_options = wh_options[wh_options["region_id"] == region_id]
     warehouse = st.sidebar.selectbox("Warehouse", ["All"] + sorted(wh_options["warehouse_code"].tolist()))
 
-    channel = st.sidebar.selectbox("Channel", ["All", "GT", "MT", "HORECA", "ECOM_DARKSTORE"])
+    channel = st.sidebar.selectbox("Channel", ["All", "GT", "MT", "HORECA", "ECOM_DARKSTORE"],
+                                    format_func=lambda c: CHANNEL_LABELS[c])
 
     # Bounds span order_date AND return_date -- a return can be filed weeks
     # after its order (return_date max is 2026-07-29 vs order_date max
@@ -281,13 +323,24 @@ def cached_cold_chain_breach_value(region, warehouse, channel, date_range):
 
 
 @st.cache_data(show_spinner=False)
-def cached_near_expiry():
+def cached_near_expiry(region, warehouse):
+    # Inventory is a point-in-time snapshot with no order date or channel on
+    # it, so date_range/channel don't apply -- only region and warehouse do,
+    # via a join to the warehouses/regions dims. Found and fixed after a UX
+    # audit caught this table silently showing global inventory while every
+    # other Cold Chain element on the page was correctly scoped to the
+    # sidebar's region/warehouse filter.
     ctx = build_ctx()
     inv = ctx["data"]["inventory"]
+    wh = ctx["data"]["warehouses"].merge(ctx["data"]["regions"][["region_id", "region_name"]], on="region_id")
     near_expiry = inv[inv["ageing_bucket"].isin(["61-90", "90+"])]
-    by_wh = near_expiry.groupby("warehouse_id")["on_hand_cases"].sum().reset_index()
-    by_wh = by_wh.merge(ctx["data"]["warehouses"][["warehouse_id", "warehouse_code"]], on="warehouse_id")
-    return by_wh[["warehouse_code", "on_hand_cases"]]
+    near_expiry = near_expiry.merge(wh[["warehouse_id", "warehouse_code", "region_name"]], on="warehouse_id")
+    if region != "All":
+        near_expiry = near_expiry[near_expiry["region_name"] == region]
+    if warehouse != "All":
+        near_expiry = near_expiry[near_expiry["warehouse_code"] == warehouse]
+    by_wh = near_expiry.groupby("warehouse_code")["on_hand_cases"].sum().reset_index()
+    return by_wh
 
 
 @st.cache_data(show_spinner=False)
@@ -352,15 +405,25 @@ def overview_tab(region, warehouse, channel, date_range):
         if len(exc_p) and exc_p["chilled_deliveries"].sum() else None
     ret_prior = cached_returns_pct(region, warehouse, channel, date_range, prior_start, prior_end)
 
+    # All 4 tiles now carry a help tooltip -- a first-time-user audit found
+    # only OTIF had one, so the other three read as unexplained numbers with
+    # no way to tell if e.g. a 21.5 excursion rate is good or catastrophic.
     kpis = [
-        ("Case fill rate (eaches)", fr_val, fr_prior, True, "%", None),
+        ("Case fill rate (eaches)", fr_val, fr_prior, True, "%",
+         "Delivered eaches / ordered eaches, for orders that reached fulfillment "
+         "(delivered or partially delivered). Cancelled and still-open orders are "
+         "excluded from both sides of the ratio."),
         ("OTIF", otif_val, otif_prior, True, "%",
          "Strict definition: any delay at all counts as late (no grace window), and "
          "'in full' compares delivered to allocated stock, not to what was originally "
          "ordered -- so this reads much lower than fill rate on the same orders. "
          "That's expected under this definition, not a data error -- see DECISIONS.md."),
-        ("Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, "", None),
-        ("Returns as % of dispatch value", ret_val, ret_prior, False, "%", None),
+        ("Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, "",
+         "Chilled deliveries with a recorded max temperature above 8 degrees C, per "
+         "100 chilled deliveries that month. Lower is better."),
+        ("Returns as % of dispatch value", ret_val, ret_prior, False, "%",
+         "Credit-note value from returns as a percentage of dispatched order value "
+         "in the same period."),
     ]
     cols = st.columns(4)
     for col, (label, val, prior, higher_better, unit, help_text) in zip(cols, kpis):
@@ -371,23 +434,34 @@ def overview_tab(region, warehouse, channel, date_range):
     st.caption(f"vs prior quarter ({prior_start:%b %Y} to {prior_end:%b %Y}). "
                "Status reflects direction of travel, not an absolute target.")
 
+    # This dataset's fulfillment rates happen to be near-uniform across
+    # regions/warehouses, so narrowing the sidebar filters barely moves the
+    # rounded KPI percentages -- which reads exactly like "the filter didn't
+    # apply." It did; the underlying order-line count below is the proof,
+    # since that always changes with the filter even when the ratio doesn't.
+    active_filters = [f"{k}: {v}" for k, v in
+                       [("Region", region), ("Warehouse", warehouse), ("Channel", channel)] if v != "All"]
+    if active_filters:
+        st.caption(f"Filtered to {', '.join(active_filters)} -- "
+                   f"{int(fr['ordered_eaches'].sum()):,} eaches ordered this quarter under this filter.")
+
     left, right = st.columns(2)
     with left:
         st.markdown("**Worst 5 outlets by fill rate, Q1**")
-        st.dataframe(fr_by_outlet[fr_by_outlet["ordered_eaches"] > 0].head(5), use_container_width=True,
+        st.dataframe(fr_by_outlet[fr_by_outlet["ordered_eaches"] > 0].head(5), width=500,
                      column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
     with right:
         st.markdown("**Fill rate by region, Q1**")
         st.altair_chart(charts.bar(fr, "region_name", "fill_rate_pct", "Region", "Fill rate %", height=260, width=500))
     with st.expander("View region chart as table"):
-        st.dataframe(fr, use_container_width=True,
+        st.dataframe(fr, width=500,
                      column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
 
 
 def service_tab(region, warehouse, channel, date_range):
     st.subheader("Service: fill rate & OTIF (eaches)")
     grain = st.radio("Break down by", ["region_name", "warehouse_code", "route_code", "outlet_name"],
-                      horizontal=True, key="service_grain")
+                      horizontal=True, key="service_grain", format_func=lambda g: GRAIN_LABELS[g])
 
     # Switching grain is a cache miss (new key) -- without an explicit spinner
     # here, Streamlit keeps the PREVIOUS grain's tables on screen until the
@@ -400,11 +474,11 @@ def service_tab(region, warehouse, channel, date_range):
         ot = cached_otif(region, warehouse, channel, date_range, grain)
 
     st.markdown("Worst performers first (case fill rate, eaches)")
-    st.dataframe(fr, use_container_width=True,
+    st.dataframe(fr, width=900,
                  column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
 
     st.markdown("OTIF, worst performers first")
-    st.dataframe(ot, use_container_width=True,
+    st.dataframe(ot, width=900,
                  column_config={"otif_pct": st.column_config.NumberColumn(format="%.1f%%")})
 
 
@@ -414,11 +488,11 @@ def cold_chain_tab(region, warehouse, channel, date_range):
     st.markdown("Temperature excursions per hundred chilled deliveries, by month")
     st.altair_chart(charts.line(exc, "month", "excursions_per_100", "Month", "Excursions / 100", width=900))
     with st.expander("View as table"):
-        st.dataframe(exc, use_container_width=True,
+        st.dataframe(exc, width=900,
                      column_config={"excursions_per_100": st.column_config.NumberColumn(format="%.1f")})
 
     st.markdown("Near-expiry inventory (ageing bucket 61-90 or 90+ days)")
-    st.dataframe(cached_near_expiry(), use_container_width=True)
+    st.dataframe(cached_near_expiry(region, warehouse), width=900)
 
     st.markdown("Returns attributed to cold-chain breach (reason RT06_COLD_CHAIN_BREACH)")
     breach_value = cached_cold_chain_breach_value(region, warehouse, channel, date_range)
@@ -436,7 +510,7 @@ def money_tab(region, warehouse, channel, date_range):
         fc["freight_amount_cr"] = charts.to_crore(fc["amount_inr"])
         st.dataframe(
             fc[["warehouse_code", "month", "freight_amount_cr", "delivered_cases_equiv", "freight_cost_per_case_inr"]],
-            use_container_width=True,
+            width=900,
             column_config={
                 "warehouse_code": "Warehouse",
                 "month": "Month",
@@ -452,14 +526,14 @@ def money_tab(region, warehouse, channel, date_range):
         by_carrier["spend_cr"] = charts.to_crore(by_carrier["amount_inr"])
         st.altair_chart(charts.bar(by_carrier, "carrier_name", "spend_cr", "Carrier", "Spend (₹ Cr)", width=900))
         with st.expander("View as table"):
-            st.dataframe(by_carrier[["carrier_name", "spend_cr"]], use_container_width=True,
+            st.dataframe(by_carrier[["carrier_name", "spend_cr"]], width=900,
                          column_config={"spend_cr": st.column_config.NumberColumn("Spend (₹ Cr)", format="%.2f")})
 
     st.markdown("Returns leakage by category (value and leading reason)")
     leak = cached_returns_leakage(region, warehouse, channel, date_range).copy()
     leak["credit_note_lakh"] = charts.to_lakh(leak["credit_note_value_inr"])
     st.dataframe(leak[["category", "credit_note_lakh", "return_lines", "leading_reason_code"]],
-                 use_container_width=True,
+                 width=900,
                  column_config={
                      "credit_note_lakh": st.column_config.NumberColumn("Credit notes (₹ L)", format="%.2f"),
                      "return_lines": "Return lines",
@@ -488,12 +562,15 @@ def price_tab(ctx):
         if len(pp):
             by_cat = pp.groupby("category")["gap_pct"].mean().reset_index().sort_values("gap_pct", ascending=False)
             st.altair_chart(charts.bar(by_cat, "category", "gap_pct", "Category", "Avg gap %", height=220, width=580))
+            with st.expander("View as table"):
+                st.dataframe(by_cat, width=500,
+                             column_config={"gap_pct": st.column_config.NumberColumn("Avg gap %", format="%.1f%%")})
 
     st.markdown("All matched SKUs (₹ = INR). Positive gap = priced above the lowest competitor; negative = below.")
     st.dataframe(
         pp[["matched_sku_code", "city", "category", "kestrel_mrp_inr", "lowest_competitor_price_inr",
             "gap_inr", "gap_pct"]],
-        use_container_width=True,
+        width=900,
         column_config={
             "matched_sku_code": "SKU",
             "kestrel_mrp_inr": st.column_config.NumberColumn("Kestrel MRP (₹)", format="%.2f"),
@@ -536,7 +613,9 @@ def ask_tab(ctx):
                                      label_visibility="collapsed")
             submitted = st.form_submit_button("Ask", use_container_width=True, type="primary")
         if submitted:
-            st.session_state["ask_question"] = q_input
+            st.session_state["ask_question"] = q_input.strip()
+            if not st.session_state["ask_question"]:
+                st.warning("Type a question first, or click one of the suggestions above.")
 
     with st.expander("Full list of what I can answer"):
         st.text(nl.CAPABILITIES)
@@ -544,13 +623,19 @@ def ask_tab(ctx):
     q = st.session_state["ask_question"]
     if q:
         text, df = cached_nl_answer(q)
-        st.markdown(f"**{text}**")
+        # Bolding a multi-line answer (the "I don't understand this" fallback,
+        # which is the fixed multi-paragraph CAPABILITIES list) breaks
+        # CommonMark's inline-emphasis parsing across paragraph/list
+        # boundaries -- the leading/trailing ** render as literal asterisks
+        # instead of applying bold. Only single-line answers get bolded.
+        st.markdown(f"**{text}**" if "\n" not in text else text)
         if df is not None:
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, width=900)
 
 
 def main():
     st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
+    components.html(_SIDEBAR_LABEL_FIX, height=0)
     st.title("Kestrel Provisions: Supply Chain Control Tower")
     # Tab bar built before the data load -- it's static chrome with no data
     # dependency, so it can render immediately instead of waiting behind

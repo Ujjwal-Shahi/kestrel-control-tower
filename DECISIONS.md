@@ -121,6 +121,66 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
   hover states (not outer glow), the one motivated tab-switch fade
   (feedback that a click registered, per the skill's "motion needs a
   reason" rule), and em-dash-free UI strings all still held.
+- **Four parallel UX-tester agents (first-time user, daily power-user,
+  accessibility/responsive, edge-case breaker) audited the live app.**
+  Real, verified findings fixed:
+  - **`cached_near_expiry()` ignored every sidebar filter** -- caught by
+    the edge-case agent reading the source directly. It's the only
+    Cold Chain element on the page that didn't take `region`/`warehouse`,
+    so a regional manager filtering to their region saw *global* near-
+    expiry inventory with no indication it wasn't scoped. Fixed by
+    joining to warehouses/regions and filtering on both (channel and
+    date don't apply -- inventory is a point-in-time snapshot with
+    neither dimension on it).
+  - **Ask Anything's fallback answer showed literal `**` asterisks.**
+    `st.markdown(f"**{text}**")` bolds every answer, but the fallback
+    (`nl.CAPABILITIES`, a multi-paragraph bullet list) can't have inline
+    emphasis span paragraph/list boundaries under CommonMark, so the
+    markers rendered as literal characters -- on what's the *common*
+    path for this deterministic matcher (anything outside its fixed
+    question set). Fixed by only bolding single-line answers.
+  - **Two agents disagreed on whether the Region filter actually works**
+    (one saw KPIs change, one saw them stay identical). Verified directly
+    in Python, bypassing UI automation entirely: the filter is correct
+    -- row counts and raw numerator/denominator sums genuinely differ per
+    region -- but this synthetic dataset has near-uniform fulfillment
+    rates across regions (all within ~0.05 points of each other), so the
+    rounded headline percentage barely moves. That's indistinguishable
+    from "the filter is broken" at a glance. Added a caption under the
+    Overview KPIs, shown only when a filter is active, stating the
+    filtered order-line count -- a number that *does* move visibly even
+    when the ratio doesn't, as proof the filter took effect.
+  - Raw backend identifiers leaking into UI controls with no glossary
+    (`GT`/`MT`/`HORECA`/`ECOM_DARKSTORE` channel codes, `region_name`/
+    `warehouse_code`/`route_code`/`outlet_name` as the Service tab's
+    "Break down by" options) -- mapped to plain-English labels via
+    `format_func`, keeping the underlying codes as the actual filter/
+    cache-key values.
+  - Only the OTIF tile had a help tooltip; the other three Overview KPIs
+    read as unexplained numbers to a first-time viewer. Added tooltips
+    to all four.
+  - The Price Position category-gap bar chart was the one chart on the
+    page without a "View as table" twin (the README's own documented
+    design rule). Added one.
+  - Empty Ask-Anything submissions did nothing with no feedback. Added
+    a warning.
+  - Not fixed, and not a bug: `st.dataframe` tables measured stuck at
+    52px wide during this audit. Traced to the Browser-pane sandbox not
+    compositing frames at all in this session (`screenshot` failed with
+    "page is not compositing frames" consistently, independent of any
+    app code) -- `devicePixelRatio` was a clean 1.0, ruling out the
+    earlier Vega chart bug's cause, and the dataframe grid depends on a
+    real paint-driven `ResizeObserver` cycle to size itself the way the
+    Vega charts (fixed-width, no ResizeObserver) don't. Switched
+    `use_container_width=True` to explicit `width=` values anyway as a
+    more deterministic sizing choice, but this needs confirming in a
+    real browser, not claimed as fixed.
+  - Also surfaced but deliberately not changed: Streamlit's rerun model
+    means every sidebar filter change and grain switch costs a
+    perceptible round-trip (already the known, accepted tradeoff
+    documented above under "Breaks first in production"); the Ask
+    Anything "first-match-wins" behavior on compound questions is a
+    already-documented, accepted design limit, not a new bug.
 
 ## Next, with two more weeks
 
