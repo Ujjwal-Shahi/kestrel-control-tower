@@ -59,6 +59,17 @@ Walks all ~41,500 invoices with retry/backoff around the API's deliberate
 the Money tab reads. If the API is unreachable, the ingester keeps whatever
 was cached from a previous run rather than wiping it.
 
+## Verifying the data findings
+
+Every data-quality claim in `DECISIONS.md` is re-derived from the raw db by:
+
+```
+python etl/verify_data_findings.py
+```
+
+It prints each claim with the numbers behind it and exits non-zero if any of
+them stops holding, so the doc cannot quietly go stale against the data.
+
 ## Re-running the ETL
 
 If you get a fresh `kestrel_ops.db`, delete `data/kestrel_clean.db` and
