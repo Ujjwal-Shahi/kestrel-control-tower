@@ -43,6 +43,14 @@ def parse_created_at(row):
 
 
 def parse_actual_arrival(row):
+    """Parses both telematics vendors' arrival formats into a real timestamp.
+
+    NOTE: the parsed result is used for arrival-time analysis, NOT for the
+    on-time calculation. `planned_arrival`'s HOUR component is corrupted in
+    this dataset, so `actual_arrival - planned_arrival` is not the delay --
+    `delay_minutes` is. See the planned_arrival note in DECISIONS.md and
+    `etl/verify_data_findings.py`, which reproduces the proof.
+    """
     val, vendor = row["actual_arrival"], row["telematics_vendor"]
     if pd.isna(val):
         return pd.NaT
@@ -123,10 +131,20 @@ def build_orders(raw):
     return o
 
 
+SETTLED_RETURN_STATUSES = ("APPROVED", "PENDING")
+
+
 def build_returns(raw):
     r = raw["returns_credit_notes"].copy()
     r["return_qty_abs"] = r["return_qty"].abs()
     r["return_date"] = pd.to_datetime(r["return_date"], errors="coerce")
+    # A REJECTED credit note is a claim the business refused to pay, so it is
+    # not leakage -- it is a claim that was successfully defended. Counting it
+    # overstates returns value by 26% (Rs 24.9L of Rs 95.8L total). This is the
+    # same reasoning already applied to DISPUTED freight invoices; applying it
+    # to only one of the two would be inconsistent. PENDING is kept: unpaid but
+    # unrefused is still an owed liability. See DECISIONS.md.
+    r["is_settled"] = r["status"].isin(SETTLED_RETURN_STATUSES)
     return r
 
 
@@ -201,6 +219,8 @@ def main():
     print(f"  order_lines: {len(order_lines)} ({int(order_lines['ordered_after_discontinuation'].sum())} "
           f"ordered after SKU discontinuation)")
     print(f"  deliveries: {len(deliveries)} ({int(deliveries['excursion_derived'].sum())} derived cold-chain excursions)")
+    print(f"  returns: {len(returns)} ({int(returns['is_settled'].sum())} settled; "
+          f"{int((~returns['is_settled']).sum())} REJECTED and excluded from leakage)")
 
 
 if __name__ == "__main__":

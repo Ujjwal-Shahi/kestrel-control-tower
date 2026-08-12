@@ -4,8 +4,29 @@ judgement call -- see DECISIONS.md, not buried here as a magic number.
 """
 import pandas as pd
 
+# On-time is measured from the delay_minutes column, NOT from
+# actual_arrival - planned_arrival. planned_arrival's hour component is
+# corrupted in this dataset: recomputing the delay disagrees with
+# delay_minutes on 87% of deliveries, and the residual is always a whole
+# multiple of 60 minutes. Reconstructing actual_arrival - delay_minutes yields
+# an exactly on-the-hour timestamp on the stored planned date for 100% of
+# 76,889 rows, while the stored hour is statistically independent of it --
+# so delay_minutes was computed against the true schedule and planned_arrival
+# was not. Using the timestamps instead would report on-time as 38.0% rather
+# than the correct 34.9%. Proof: etl/verify_data_findings.py. See DECISIONS.md.
 ON_TIME_GRACE_MINUTES = 0  # delay_minutes <= this counts as on-time
 LATE_THRESHOLD_MINUTES = 120  # ">2 hours late" per brief Q5
+
+# REJECTED credit notes are claims the business refused to pay -- defended,
+# not leaked. Excluded for the same reason DISPUTED freight invoices are.
+SETTLED_RETURN_STATUSES = ("APPROVED", "PENDING")
+
+
+def settled_returns(returns):
+    """Returns that represent real, unrefused credit. See DECISIONS.md."""
+    if "is_settled" in returns.columns:
+        return returns[returns["is_settled"].astype(bool)]
+    return returns[returns["status"].isin(SETTLED_RETURN_STATUSES)]
 
 
 def last_complete_fy_quarter(max_date):
@@ -139,7 +160,7 @@ def late_routes(deliveries, min_delivery_count=10):
 
 
 def returns_leakage_by_category(returns, products):
-    r = returns.merge(products[["product_id", "category"]], on="product_id", how="left")
+    r = settled_returns(returns).merge(products[["product_id", "category"]], on="product_id", how="left")
     g = r.groupby("category").agg(
         credit_note_value_inr=("credit_note_value_inr", "sum"),
         return_lines=("return_id", "count"),
@@ -153,11 +174,18 @@ def returns_leakage_by_category(returns, products):
     return g.sort_values("credit_note_value_inr", ascending=False)
 
 
-def returns_pct_of_dispatch(returns, orders):
+def returns_pct_of_dispatch_bps(returns, orders):
+    """Returned in BASIS POINTS (1 bp = 0.01%), not percent.
+
+    Returns run about 3.4 bps of dispatch value here -- 0.034%. Reported as a
+    percentage rounded to one decimal that is literally "0.0%", which reads as
+    a broken metric rather than a small one, on a tile Divya named as one of
+    her five asks. Basis points keep it legible and keep the quarter-on-quarter
+    delta meaningful. The tile labels the unit explicitly.
+    """
     dispatch_value = orders.loc[orders["order_status"].isin(FULFILLED_STATUSES), "order_value_net_inr"].sum()
-    returns_value = returns["credit_note_value_inr"].sum()
-    overall = round(returns_value / dispatch_value * 100, 1) if dispatch_value else None
-    return overall
+    returns_value = settled_returns(returns)["credit_note_value_inr"].sum()
+    return round(returns_value / dispatch_value * 10_000, 1) if dispatch_value else None
 
 
 def freight_cost_per_case(freight, order_lines, warehouses, period_start=None, period_end=None):

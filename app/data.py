@@ -39,6 +39,7 @@ def load_clean_tables():
     data["order_lines"]["ordered_after_discontinuation"] = (
         data["order_lines"]["ordered_after_discontinuation"].astype(bool)
     )
+    data["returns"]["is_settled"] = data["returns"]["is_settled"].astype(bool)
 
     for col in ["order_date"]:
         data["order_lines"][col] = pd.to_datetime(data["order_lines"][col], errors="coerce")
