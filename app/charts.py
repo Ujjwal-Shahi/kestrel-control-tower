@@ -8,11 +8,13 @@ the dataviz skill's color-formula: sequential = one hue for magnitude.
 """
 import altair as alt
 
-BLUE = "#2a78d6"
+# Dark-mode values from the dataviz skill's own validated palette (app runs
+# dark theme -- see .streamlit/config.toml), not invented colors.
+BLUE = "#3987e5"
 GOOD = "#0ca30c"
-CRITICAL = "#d03b3b"
-GRID = "#e1e0d9"
-AXIS = "#c3c2b7"
+CRITICAL = "#e66767"
+GRID = "#2c2c2a"
+AXIS = "#383835"
 MUTED = "#898781"
 
 LAKH = 100_000

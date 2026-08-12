@@ -68,6 +68,9 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
   deterministic layer exists to avoid. Accepted, not fixed.
 - `/internal/margin-sheet.html` found, deliberately not scraped —
   `robots.txt` disallows it and it's irrelevant to the task.
+- **Visual design** (dark theme, single accent hue, chart conventions)
+  follows the `dataviz` skill's palette and mark specs — see README's
+  "Design system" section rather than repeating it here.
 
 ## Next, with two more weeks
 

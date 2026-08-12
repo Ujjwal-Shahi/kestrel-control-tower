@@ -13,6 +13,64 @@ import charts
 
 st.set_page_config(page_title="Kestrel Control Tower", layout="wide", page_icon="\U0001F4E6")
 
+# One accent hue (the dataviz skill's own dark-mode blue, same one the charts
+# use) applied as a soft glow on hover -- restrained on purpose. "Futuristic"
+# here means dark surface + one consistent accent, not five competing effects.
+_CUSTOM_CSS = """
+<style>
+:root {
+    --kt-accent: #3987e5;
+    --kt-accent-2: #7c5cff;
+    --kt-glow: rgba(57, 135, 229, 0.35);
+}
+
+h1 {
+    background: linear-gradient(90deg, var(--kt-accent), var(--kt-accent-2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.02em;
+}
+
+div[data-testid="stMetric"] {
+    background: linear-gradient(160deg, rgba(57,135,229,0.10), rgba(124,92,255,0.03));
+    border: 1px solid rgba(57,135,229,0.20);
+    border-radius: 14px;
+    padding: 14px 16px 10px 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+div[data-testid="stMetric"]:hover {
+    border-color: rgba(57,135,229,0.55);
+    box-shadow: 0 0 22px var(--kt-glow);
+    transform: translateY(-2px);
+}
+
+button[data-testid="stBaseButton-secondary"],
+button[data-testid="stBaseButton-primaryFormSubmit"] {
+    border-radius: 10px !important;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+button[data-testid="stBaseButton-secondary"]:hover,
+button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
+    box-shadow: 0 0 16px var(--kt-glow);
+    border-color: var(--kt-accent) !important;
+}
+
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 16px !important;
+}
+
+div[data-testid="stVegaLiteChart"] {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+section[data-testid="stSidebar"] {
+    border-right: 1px solid rgba(57,135,229,0.15);
+}
+</style>
+"""
+
 
 def degrade_banner(status):
     if not status["clean_db"]:
@@ -240,10 +298,10 @@ def overview_tab(region, warehouse, channel, date_range):
     ret_prior = cached_returns_pct(region, warehouse, channel, date_range, prior_start, prior_end)
 
     kpis = [
-        ("Case fill rate (eaches)", fr_val, fr_prior, True, "%"),
-        ("OTIF", otif_val, otif_prior, True, "%"),
-        ("Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, ""),
-        ("Returns as % of dispatch value", ret_val, ret_prior, False, "%"),
+        ("\U0001F4E6 Case fill rate (eaches)", fr_val, fr_prior, True, "%"),
+        ("\U0001F69A OTIF", otif_val, otif_prior, True, "%"),
+        ("❄️ Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, ""),
+        ("\U0001F4B8 Returns as % of dispatch value", ret_val, ret_prior, False, "%"),
     ]
     cols = st.columns(4)
     for col, (label, val, prior, higher_better, unit) in zip(cols, kpis):
@@ -429,6 +487,7 @@ def ask_tab(ctx):
 
 
 def main():
+    st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
     st.title("Kestrel Provisions: Supply Chain Control Tower")
     status = data.data_status()
     degrade_banner(status)
@@ -436,7 +495,8 @@ def main():
     ctx = build_ctx()
     region, warehouse, channel, date_range = sidebar_filters(ctx)
 
-    tabs = st.tabs(["Overview", "Service", "Cold Chain", "Money", "Price Position", "Ask Anything"])
+    tabs = st.tabs(["\U0001F4CA Overview", "\U0001F69A Service", "❄️ Cold Chain",
+                     "\U0001F4B0 Money", "\U0001F3F7️ Price Position", "\U0001F50D Ask Anything"])
     with tabs[0]:
         overview_tab(region, warehouse, channel, date_range)
     with tabs[1]:
