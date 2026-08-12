@@ -5,6 +5,21 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+
+def _embed_html(html, height=0):
+    """st.components.v1.html is deprecated for removal after 2026-06-01; st.iframe
+    is its replacement but only exists on newer Streamlit. Prefer the new API when
+    present so a reviewer on a current release doesn't hit a removed function, and
+    fall back on older ones. This is a purely cosmetic accessibility patch, so if
+    neither path exists the app must still run -- hence the bare except."""
+    try:
+        if hasattr(st, "iframe"):
+            st.iframe(html, height=height)
+        else:
+            components.html(html, height=height)
+    except Exception:
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 import data
@@ -779,7 +794,7 @@ def ask_tab(ctx):
 
 def main():
     st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
-    components.html(_SIDEBAR_LABEL_FIX, height=0)
+    _embed_html(_SIDEBAR_LABEL_FIX, height=0)
     st.title("Kestrel Provisions: Supply Chain Control Tower")
     # Tab bar built before the data load -- it's static chrome with no data
     # dependency, so it can render immediately instead of waiting behind
