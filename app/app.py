@@ -11,6 +11,7 @@ import data
 import metrics
 import nl
 import charts
+import tables
 
 st.set_page_config(page_title="Kestrel Control Tower", layout="wide", page_icon="\U0001F4E6")
 
@@ -448,14 +449,13 @@ def overview_tab(region, warehouse, channel, date_range):
     left, right = st.columns(2)
     with left:
         st.markdown("**Worst 5 outlets by fill rate, Q1**")
-        st.dataframe(fr_by_outlet[fr_by_outlet["ordered_eaches"] > 0].head(5), width=500,
-                     column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
+        tables.paginated_table(fr_by_outlet[fr_by_outlet["ordered_eaches"] > 0].head(5),
+                                formats={"fill_rate_pct": (None, "%.1f%%")}, key="overview_worst_outlets")
     with right:
         st.markdown("**Fill rate by region, Q1**")
         st.altair_chart(charts.bar(fr, "region_name", "fill_rate_pct", "Region", "Fill rate %", height=260, width=500))
     with st.expander("View region chart as table"):
-        st.dataframe(fr, width=500,
-                     column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
+        tables.paginated_table(fr, formats={"fill_rate_pct": (None, "%.1f%%")}, key="overview_region_table")
 
 
 def service_tab(region, warehouse, channel, date_range):
@@ -474,12 +474,10 @@ def service_tab(region, warehouse, channel, date_range):
         ot = cached_otif(region, warehouse, channel, date_range, grain)
 
     st.markdown("Worst performers first (case fill rate, eaches)")
-    st.dataframe(fr, width=900,
-                 column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
+    tables.paginated_table(fr, formats={"fill_rate_pct": (None, "%.1f%%")}, key=f"service_fill_rate_{grain}")
 
     st.markdown("OTIF, worst performers first")
-    st.dataframe(ot, width=900,
-                 column_config={"otif_pct": st.column_config.NumberColumn(format="%.1f%%")})
+    tables.paginated_table(ot, formats={"otif_pct": (None, "%.1f%%")}, key=f"service_otif_{grain}")
 
 
 def cold_chain_tab(region, warehouse, channel, date_range):
@@ -488,11 +486,10 @@ def cold_chain_tab(region, warehouse, channel, date_range):
     st.markdown("Temperature excursions per hundred chilled deliveries, by month")
     st.altair_chart(charts.line(exc, "month", "excursions_per_100", "Month", "Excursions / 100", width=900))
     with st.expander("View as table"):
-        st.dataframe(exc, width=900,
-                     column_config={"excursions_per_100": st.column_config.NumberColumn(format="%.1f")})
+        tables.paginated_table(exc, formats={"excursions_per_100": (None, "%.1f")}, key="coldchain_excursions")
 
     st.markdown("Near-expiry inventory (ageing bucket 61-90 or 90+ days)")
-    st.dataframe(cached_near_expiry(region, warehouse), width=900)
+    tables.paginated_table(cached_near_expiry(region, warehouse), key="coldchain_near_expiry")
 
     st.markdown("Returns attributed to cold-chain breach (reason RT06_COLD_CHAIN_BREACH)")
     breach_value = cached_cold_chain_breach_value(region, warehouse, channel, date_range)
@@ -508,16 +505,16 @@ def money_tab(region, warehouse, channel, date_range):
     else:
         fc = cached_freight_cost(region, warehouse, channel, date_range).copy()
         fc["freight_amount_cr"] = charts.to_crore(fc["amount_inr"])
-        st.dataframe(
+        tables.paginated_table(
             fc[["warehouse_code", "month", "freight_amount_cr", "delivered_cases_equiv", "freight_cost_per_case_inr"]],
-            width=900,
-            column_config={
-                "warehouse_code": "Warehouse",
-                "month": "Month",
-                "freight_amount_cr": st.column_config.NumberColumn("Freight amount (₹ Cr)", format="%.2f"),
-                "delivered_cases_equiv": st.column_config.NumberColumn("Delivered cases", format="%.0f"),
-                "freight_cost_per_case_inr": st.column_config.NumberColumn("Cost / case (₹)", format="%.2f"),
+            formats={
+                "warehouse_code": ("Warehouse", None),
+                "month": ("Month", None),
+                "freight_amount_cr": ("Freight amount (₹ Cr)", "%.2f"),
+                "delivered_cases_equiv": ("Delivered cases", "%.0f"),
+                "freight_cost_per_case_inr": ("Cost / case (₹)", "%.2f"),
             },
+            key="money_freight_cost",
         )
         st.caption("Excludes DISPUTED invoices (contested, unsettled) -- see DECISIONS.md.")
 
@@ -526,19 +523,21 @@ def money_tab(region, warehouse, channel, date_range):
         by_carrier["spend_cr"] = charts.to_crore(by_carrier["amount_inr"])
         st.altair_chart(charts.bar(by_carrier, "carrier_name", "spend_cr", "Carrier", "Spend (₹ Cr)", width=900))
         with st.expander("View as table"):
-            st.dataframe(by_carrier[["carrier_name", "spend_cr"]], width=900,
-                         column_config={"spend_cr": st.column_config.NumberColumn("Spend (₹ Cr)", format="%.2f")})
+            tables.paginated_table(by_carrier[["carrier_name", "spend_cr"]],
+                                    formats={"spend_cr": ("Spend (₹ Cr)", "%.2f")}, key="money_carrier_spend")
 
     st.markdown("Returns leakage by category (value and leading reason)")
     leak = cached_returns_leakage(region, warehouse, channel, date_range).copy()
     leak["credit_note_lakh"] = charts.to_lakh(leak["credit_note_value_inr"])
-    st.dataframe(leak[["category", "credit_note_lakh", "return_lines", "leading_reason_code"]],
-                 width=900,
-                 column_config={
-                     "credit_note_lakh": st.column_config.NumberColumn("Credit notes (₹ L)", format="%.2f"),
-                     "return_lines": "Return lines",
-                     "leading_reason_code": "Leading reason",
-                 })
+    tables.paginated_table(
+        leak[["category", "credit_note_lakh", "return_lines", "leading_reason_code"]],
+        formats={
+            "credit_note_lakh": ("Credit notes (₹ L)", "%.2f"),
+            "return_lines": ("Return lines", None),
+            "leading_reason_code": ("Leading reason", None),
+        },
+        key="money_returns_leakage",
+    )
 
 
 def price_tab(ctx):
@@ -563,21 +562,22 @@ def price_tab(ctx):
             by_cat = pp.groupby("category")["gap_pct"].mean().reset_index().sort_values("gap_pct", ascending=False)
             st.altair_chart(charts.bar(by_cat, "category", "gap_pct", "Category", "Avg gap %", height=220, width=580))
             with st.expander("View as table"):
-                st.dataframe(by_cat, width=500,
-                             column_config={"gap_pct": st.column_config.NumberColumn("Avg gap %", format="%.1f%%")})
+                tables.paginated_table(by_cat, formats={"gap_pct": ("Avg gap %", "%.1f%%")},
+                                        key="price_category_gap")
 
     st.markdown("All matched SKUs (₹ = INR). Positive gap = priced above the lowest competitor; negative = below.")
-    st.dataframe(
+    tables.paginated_table(
         pp[["matched_sku_code", "city", "category", "kestrel_mrp_inr", "lowest_competitor_price_inr",
             "gap_inr", "gap_pct"]],
-        width=900,
-        column_config={
-            "matched_sku_code": "SKU",
-            "kestrel_mrp_inr": st.column_config.NumberColumn("Kestrel MRP (₹)", format="%.2f"),
-            "lowest_competitor_price_inr": st.column_config.NumberColumn("Lowest competitor price (₹)", format="%.2f"),
-            "gap_inr": st.column_config.NumberColumn("Gap (₹)", format="%.2f"),
-            "gap_pct": st.column_config.NumberColumn("Gap %", format="%.1f%%"),
+        formats={
+            "matched_sku_code": ("SKU", None),
+            "kestrel_mrp_inr": ("Kestrel MRP (₹)", "%.2f"),
+            "lowest_competitor_price_inr": ("Lowest competitor price (₹)", "%.2f"),
+            "gap_inr": ("Gap (₹)", "%.2f"),
+            "gap_pct": ("Gap %", "%.1f%%"),
         },
+        page_size=20,
+        key=f"price_matched_skus_{city}",
     )
     match_rate = ctx["price_matches"]["matched_sku_code"].notna().mean() * 100
     st.caption(f"{match_rate:.0f}% of scraped listings matched to a Kestrel SKU "
@@ -630,7 +630,7 @@ def ask_tab(ctx):
         # instead of applying bold. Only single-line answers get bolded.
         st.markdown(f"**{text}**" if "\n" not in text else text)
         if df is not None:
-            st.dataframe(df, width=900)
+            tables.paginated_table(df, key=f"ask_answer_{hash(q)}")
 
 
 def main():

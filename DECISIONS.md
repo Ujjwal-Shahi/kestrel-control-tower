@@ -164,17 +164,31 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
     design rule). Added one.
   - Empty Ask-Anything submissions did nothing with no feedback. Added
     a warning.
-  - Not fixed, and not a bug: `st.dataframe` tables measured stuck at
-    52px wide during this audit. Traced to the Browser-pane sandbox not
-    compositing frames at all in this session (`screenshot` failed with
-    "page is not compositing frames" consistently, independent of any
-    app code) -- `devicePixelRatio` was a clean 1.0, ruling out the
-    earlier Vega chart bug's cause, and the dataframe grid depends on a
-    real paint-driven `ResizeObserver` cycle to size itself the way the
-    Vega charts (fixed-width, no ResizeObserver) don't. Switched
-    `use_container_width=True` to explicit `width=` values anyway as a
-    more deterministic sizing choice, but this needs confirming in a
-    real browser, not claimed as fixed.
+  - `st.dataframe` tables measured stuck at 52px wide during this audit.
+    Traced to the Browser-pane sandbox not compositing frames at all in
+    that session (`screenshot` failed with "page is not compositing
+    frames" consistently, independent of any app code) -- `devicePixelRatio`
+    was a clean 1.0, ruling out the earlier Vega chart bug's cause, and
+    the dataframe grid depends on a real paint-driven `ResizeObserver`
+    cycle to size itself, the way the Vega charts (fixed-width, no
+    ResizeObserver) don't. Rather than leave that dependency in place on
+    an unconfirmed sandbox artifact, replaced every `st.dataframe` call
+    app-wide with a small `app/tables.py` helper (`paginated_table`)
+    built on `st.table` -- a static HTML `<table>`, no canvas, no
+    ResizeObserver, structurally immune to that failure mode -- plus
+    manual pagination (15-20 rows/page) since `st.table` has none of
+    `st.dataframe`'s built-in row virtualization. This also turned out
+    to be a real, independent win: the Service tab's per-outlet
+    breakdown (70 rows) and the Price Position matched-SKU list (629
+    rows) were previously one long scrollable grid; they're now 5 and
+    32 pages respectively, confirmed live. Traded away `st.dataframe`'s
+    built-in search/sort/fullscreen; `st.table` also has no number
+    formatting, so `paginated_table` reimplements the same
+    printf-style formats the old `column_config` calls used, plus a
+    default (comma-grouped, whole-number-aware) format for any numeric
+    column the caller didn't format explicitly, and a manual "Download
+    as CSV" button (of the full, unpaginated data) to keep that one
+    capability.
   - Also surfaced but deliberately not changed: Streamlit's rerun model
     means every sidebar filter change and grain switch costs a
     perceptible round-trip (already the known, accepted tradeoff
