@@ -57,13 +57,38 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     border-radius: 16px !important;
 }
 
+/* overflow-x: auto, not hidden -- charts use a fixed pixel width (see
+   charts.py for why: Streamlit's use_container_width sizing silently
+   returns 0-width canvases at fractional devicePixelRatio). A fixed width
+   can be wider than a narrow viewport; auto-scroll keeps the chart fully
+   visible and scrollable there instead of silently clipping it. */
 div[data-testid="stVegaLiteChart"] {
     border-radius: 12px;
+    overflow-x: auto;
+}
+
+div[data-testid="stDataFrame"] {
+    border-radius: 10px;
     overflow: hidden;
 }
 
 section[data-testid="stSidebar"] {
     border-right: 1px solid rgba(57,135,229,0.15);
+}
+
+/* Tab switch feedback -- motivated by Section 5's own rule (motion needs a
+   reason: hierarchy / storytelling / feedback / state transition). This is
+   feedback: confirms the click registered and new content is in, fast
+   enough (200ms) to read as responsive rather than decorative. */
+[role="tabpanel"] {
+    animation: kt-fade-in 0.2s ease;
+}
+@keyframes kt-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+button[data-testid="stTab"] {
+    transition: color 0.15s ease;
 }
 </style>
 """
@@ -85,16 +110,49 @@ def degrade_banner(status):
         st.warning("Not loaded yet, those sections will show as empty: " + "; ".join(missing))
 
 
-@st.cache_data(show_spinner="Loading Kestrel data (first run only -- every tab is cached after this)...")
+@st.cache_data(show_spinner=False)
 def build_ctx():
+    # No st.* calls in here on purpose -- this is called from inside every
+    # cached_* wrapper below, and Streamlit *replays* any UI element a
+    # cached function produced, on every cache hit, everywhere it's called
+    # from. Putting the status widget in here made it repeat once per
+    # wrapper (~10 times) instead of once. All loading UI lives in main()
+    # instead, gated to fire once per browser session.
     d = data.load_clean_tables()
-    freight = data.load_freight()
-    price_matches = data.load_price_matches()
     ol = metrics.enrich_order_lines(d)
     dv = metrics.enrich_deliveries(d)
     od = metrics.enrich_orders(d)
     rt = metrics.enrich_returns(d)
+    freight = data.load_freight()
+    price_matches = data.load_price_matches()
     return {"data": d, "freight": freight, "price_matches": price_matches, "ol": ol, "dv": dv, "od": od, "rt": rt}
+
+
+def load_data_with_status():
+    """Shows real staged progress on the true first load of a session; every
+    later call (including the ~10 cached_* wrappers calling build_ctx()
+    internally) is an instant cache hit with no UI, since build_ctx() itself
+    carries none. Per the LLM council's verdict on skeleton loading: a true
+    skeleton doesn't fit Streamlit's rerun model and this is a once-per-
+    session wait anyway, so the honest fix is real progress through real
+    stages (a native widget), not simulated shimmer CSS.
+
+    st.tabs renders every panel in one script pass and switching tabs is a
+    client-side show/hide with no rerun, so this placeholder is the only
+    thing standing between "collapsed status widget" and "status widget
+    wedged under the tab bar forever" -- .empty() drops it from the DOM
+    once loading is done instead of leaving a permanent completed banner."""
+    if "kt_data_loaded" in st.session_state:
+        return build_ctx()
+    placeholder = st.empty()
+    with placeholder.container():
+        with st.status("Loading Kestrel data (first run only)...", expanded=True) as status:
+            status.write("Reading cleaned operational tables, joining facts, loading freight and price data...")
+            ctx = build_ctx()
+            status.update(label="Kestrel data loaded", state="complete", expanded=False)
+    placeholder.empty()
+    st.session_state["kt_data_loaded"] = True
+    return ctx
 
 
 def sidebar_filters(ctx):
@@ -494,13 +552,18 @@ def ask_tab(ctx):
 def main():
     st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
     st.title("Kestrel Provisions: Supply Chain Control Tower")
+    # Tab bar built before the data load -- it's static chrome with no data
+    # dependency, so it can render immediately instead of waiting behind
+    # build_ctx(). Streamlit streams each st.xxx() call to the browser as it
+    # runs, so this genuinely shows up first, not just in source order.
+    tabs = st.tabs(["Overview", "Service", "Cold Chain", "Money", "Price Position", "Ask Anything"])
+
     status = data.data_status()
     degrade_banner(status)
 
-    ctx = build_ctx()
+    ctx = load_data_with_status()
     region, warehouse, channel, date_range = sidebar_filters(ctx)
 
-    tabs = st.tabs(["Overview", "Service", "Cold Chain", "Money", "Price Position", "Ask Anything"])
     with tabs[0]:
         overview_tab(region, warehouse, channel, date_range)
     with tabs[1]:

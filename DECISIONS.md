@@ -94,7 +94,33 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
   canvas never recovered, even after a manual resize event. Confirmed
   by testing: identical chart, `width=600` renders correctly every
   time, `width="container"` does not. Traded true responsiveness for
-  charts that reliably render.
+  charts that reliably render. Chart containers use `overflow-x: auto`
+  (not `hidden`) so a fixed width wider than a narrow viewport scrolls
+  instead of silently clipping.
+- **First-load progress is a real `st.status`, not simulated skeleton
+  shimmer** -- decided after running the `llm-council` skill on the
+  question. A true skeleton doesn't fit Streamlit's rerun model, and
+  every load after the first is already an instant cache hit, so the
+  honest fix is staged progress through a native widget for the one
+  real wait, not decorative shimmer CSS pretending there's more latency
+  than there is. Building it surfaced a real Streamlit trap: `st.status()`
+  called inside an `@st.cache_data` function gets *replayed* on every
+  cache hit, everywhere that function is called from. `build_ctx()` is
+  called from inside ~10 separate cached wrapper functions, so the first
+  version of this showed the loading banner about 10 times in a row on
+  first load. Fixed by keeping `build_ctx()` free of all `st.*` calls and
+  moving the status UI into a separate, non-cached `load_data_with_status()`
+  gated by `session_state` to fire once per browser session, wrapped in
+  `st.empty()` so the completed banner is removed from the DOM once
+  loading finishes rather than sitting there collapsed forever -- `st.tabs`
+  renders all six panels in one script pass and switching tabs afterward
+  is a client-side show/hide with no rerun, so nothing else would ever
+  have cleared it.
+- Third `design-taste-frontend` pass, focused on "feel responsive /
+  cool / interesting": no new findings. Single accent hue, inner-border
+  hover states (not outer glow), the one motivated tab-switch fade
+  (feedback that a click registered, per the skill's "motion needs a
+  reason" rule), and em-dash-free UI strings all still held.
 
 ## Next, with two more weeks
 
