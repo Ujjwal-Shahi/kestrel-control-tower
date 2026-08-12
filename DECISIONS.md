@@ -71,6 +71,15 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
 - **Visual design** (dark theme, single accent hue, chart conventions)
   follows the `dataviz` skill's palette and mark specs — see README's
   "Design system" section rather than repeating it here.
+- **Charts use a fixed pixel width, not Streamlit's `use_container_width`
+  responsive sizing.** That path depends on Vega-Embed's ResizeObserver
+  correctly measuring the wrapper element; at a fractional
+  `devicePixelRatio` (observed: 1.25, the default under Windows' common
+  125% display scaling) the measurement came back 0 and the chart
+  canvas never recovered, even after a manual resize event. Confirmed
+  by testing: identical chart, `width=600` renders correctly every
+  time, `width="container"` does not. Traded true responsiveness for
+  charts that reliably render.
 
 ## Next, with two more weeks
 

@@ -52,7 +52,13 @@ _BASE_CONFIG = {
 }
 
 
-def bar(df, x, y, x_title=None, y_title=None, height=320):
+def bar(df, x, y, x_title=None, y_title=None, height=320, width=680):
+    # Fixed pixel width, not width="container" + use_container_width=True.
+    # The "container" auto-fit path depends on Vega-Embed's ResizeObserver
+    # correctly measuring the wrapper element; at a fractional devicePixelRatio
+    # (observed: 1.25, the default for Windows' common 125% display scaling)
+    # that measurement reliably came back 0 and the canvas never recovered
+    # even after a manual resize event. A fixed width always renders.
     chart = (
         alt.Chart(df)
         .mark_bar(color=BLUE, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=24)
@@ -61,13 +67,13 @@ def bar(df, x, y, x_title=None, y_title=None, height=320):
             y=alt.Y(f"{y}:Q", title=y_title or y),
             tooltip=[x, y],
         )
-        .properties(height=height)
+        .properties(width=width, height=height)
         .configure(**_BASE_CONFIG)
     )
     return chart
 
 
-def line(df, x, y, x_title=None, y_title=None, height=320):
+def line(df, x, y, x_title=None, y_title=None, height=320, width=680):
     chart = (
         alt.Chart(df)
         .mark_line(color=BLUE, strokeWidth=2, point=alt.OverlayMarkDef(color=BLUE, size=64, filled=True))
@@ -76,7 +82,7 @@ def line(df, x, y, x_title=None, y_title=None, height=320):
             y=alt.Y(f"{y}:Q", title=y_title or y),
             tooltip=[x, y],
         )
-        .properties(height=height)
+        .properties(width=width, height=height)
         .configure(**_BASE_CONFIG)
     )
     return chart

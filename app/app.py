@@ -298,15 +298,19 @@ def overview_tab(region, warehouse, channel, date_range):
     ret_prior = cached_returns_pct(region, warehouse, channel, date_range, prior_start, prior_end)
 
     kpis = [
-        ("\U0001F4E6 Case fill rate (eaches)", fr_val, fr_prior, True, "%"),
-        ("\U0001F69A OTIF", otif_val, otif_prior, True, "%"),
-        ("❄️ Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, ""),
-        ("\U0001F4B8 Returns as % of dispatch value", ret_val, ret_prior, False, "%"),
+        ("\U0001F4E6 Case fill rate (eaches)", fr_val, fr_prior, True, "%", None),
+        ("\U0001F69A OTIF", otif_val, otif_prior, True, "%",
+         "Strict definition: any delay at all counts as late (no grace window), and "
+         "'in full' compares delivered to allocated stock, not to what was originally "
+         "ordered -- so this reads much lower than fill rate on the same orders. "
+         "That's expected under this definition, not a data error -- see DECISIONS.md."),
+        ("❄️ Cold-chain excursions / 100 chilled", exc_val, exc_prior, False, "", None),
+        ("\U0001F4B8 Returns as % of dispatch value", ret_val, ret_prior, False, "%", None),
     ]
     cols = st.columns(4)
-    for col, (label, val, prior, higher_better, unit) in zip(cols, kpis):
+    for col, (label, val, prior, higher_better, unit, help_text) in zip(cols, kpis):
         d, dc = _delta(val, prior, higher_better)
-        col.metric(label, f"{val}{unit}" if val is not None else "n/a", delta=d, delta_color=dc)
+        col.metric(label, f"{val}{unit}" if val is not None else "n/a", delta=d, delta_color=dc, help=help_text)
         delta_raw = None if (val is None or prior is None) else round(val - prior, 1)
         col.markdown(_status_badge(delta_raw, higher_better))
     st.caption(f"vs prior quarter ({prior_start:%b %Y} to {prior_end:%b %Y}) — "
@@ -319,8 +323,7 @@ def overview_tab(region, warehouse, channel, date_range):
                      column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
     with right:
         st.markdown("**Fill rate by region, Q1**")
-        st.altair_chart(charts.bar(fr, "region_name", "fill_rate_pct", "Region", "Fill rate %", height=260),
-                         use_container_width=True)
+        st.altair_chart(charts.bar(fr, "region_name", "fill_rate_pct", "Region", "Fill rate %", height=260, width=500))
     with st.expander("View region chart as table"):
         st.dataframe(fr, use_container_width=True,
                      column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
@@ -346,8 +349,7 @@ def cold_chain_tab(region, warehouse, channel, date_range):
     st.subheader("Cold chain")
     exc = cached_excursions(region, warehouse, channel, date_range)
     st.markdown("Temperature excursions per hundred chilled deliveries, by month")
-    st.altair_chart(charts.line(exc, "month", "excursions_per_100", "Month", "Excursions / 100"),
-                     use_container_width=True)
+    st.altair_chart(charts.line(exc, "month", "excursions_per_100", "Month", "Excursions / 100", width=900))
     with st.expander("View as table"):
         st.dataframe(exc, use_container_width=True,
                      column_config={"excursions_per_100": st.column_config.NumberColumn(format="%.1f")})
@@ -385,8 +387,7 @@ def money_tab(region, warehouse, channel, date_range):
         st.markdown("Freight spend by carrier")
         by_carrier = cached_carrier_spend(region, warehouse, channel, date_range).copy()
         by_carrier["spend_cr"] = charts.to_crore(by_carrier["amount_inr"])
-        st.altair_chart(charts.bar(by_carrier, "carrier_name", "spend_cr", "Carrier", "Spend (₹ Cr)"),
-                         use_container_width=True)
+        st.altair_chart(charts.bar(by_carrier, "carrier_name", "spend_cr", "Carrier", "Spend (₹ Cr)", width=900))
         with st.expander("View as table"):
             st.dataframe(by_carrier[["carrier_name", "spend_cr"]], use_container_width=True,
                          column_config={"spend_cr": st.column_config.NumberColumn("Spend (₹ Cr)", format="%.2f")})
@@ -423,8 +424,7 @@ def price_tab(ctx):
     with c2:
         if len(pp):
             by_cat = pp.groupby("category")["gap_pct"].mean().reset_index().sort_values("gap_pct", ascending=False)
-            st.altair_chart(charts.bar(by_cat, "category", "gap_pct", "Category", "Avg gap %", height=220),
-                             use_container_width=True)
+            st.altair_chart(charts.bar(by_cat, "category", "gap_pct", "Category", "Avg gap %", height=220, width=580))
 
     st.markdown("All matched SKUs (₹ = INR). Positive gap = priced above the lowest competitor; negative = below.")
     st.dataframe(
