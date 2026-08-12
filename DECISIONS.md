@@ -53,6 +53,12 @@ re-derives all of them from the raw db and exits non-zero if any stops holding.
 - **Returns vs dispatch is reported in basis points (~3.4 bps settled), not percent.** As
   a one-decimal percentage it renders as "0.0%" -- a metric Divya explicitly
   asked for, reading as broken rather than small.
+- **Returns leakage by carrier is not derivable and is not shown.** Divya asked
+  for leakage "by category and by carrier". Category is there; carrier is not,
+  because carrier identity exists only in the freight API and never on a
+  delivery or a credit note. The only bridge is route/warehouse plus date,
+  which would attribute returns to a carrier by coincidence of geography.
+  Freight *spend* by carrier is shown, since that is a real join.
 - **KP-2301 not reproducible** -- header reconciles to line values to within
   floating-point noise across all three source systems. Treated as a stale doc
   entry rather than designed around.
