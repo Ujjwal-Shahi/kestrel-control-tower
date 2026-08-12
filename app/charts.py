@@ -11,8 +11,6 @@ import altair as alt
 # Dark-mode values from the dataviz skill's own validated palette (app runs
 # dark theme -- see .streamlit/config.toml), not invented colors.
 BLUE = "#3987e5"
-GOOD = "#0ca30c"
-CRITICAL = "#e66767"
 GRID = "#2c2c2a"
 AXIS = "#383835"
 MUTED = "#898781"

@@ -268,7 +268,7 @@ def overview_tab(region, warehouse, channel, date_range):
     q_start, q_end = metrics.last_complete_fy_quarter(build_ctx()["ol"]["order_date"].max())
     prior_start, prior_end = metrics.last_complete_fy_quarter(q_start - pd.Timedelta(days=1))
     quarter_num = ((q_start.month - 4) % 12) // 3 + 1
-    st.subheader(f"Q{quarter_num} FY — {q_start:%b %Y} to {q_end:%b %Y} (the board asks about Q1 first)")
+    st.subheader(f"Q{quarter_num} FY: {q_start:%b %Y} to {q_end:%b %Y} (the board asks about Q1 first)")
 
     fr = cached_fill_rate(region, warehouse, channel, date_range, "region_name", q_start, q_end)
     fr_by_outlet = cached_fill_rate(region, warehouse, channel, date_range, "outlet_name", q_start, q_end)
@@ -310,8 +310,8 @@ def overview_tab(region, warehouse, channel, date_range):
         col.metric(label, f"{val}{unit}" if val is not None else "n/a", delta=d, delta_color=dc, help=help_text)
         delta_raw = None if (val is None or prior is None) else round(val - prior, 1)
         col.markdown(_status_badge(delta_raw, higher_better))
-    st.caption(f"vs prior quarter ({prior_start:%b %Y} to {prior_end:%b %Y}) — "
-               "status reflects direction of travel, not an absolute target.")
+    st.caption(f"vs prior quarter ({prior_start:%b %Y} to {prior_end:%b %Y}). "
+               "Status reflects direction of travel, not an absolute target.")
 
     left, right = st.columns(2)
     with left:
@@ -330,13 +330,21 @@ def service_tab(region, warehouse, channel, date_range):
     st.subheader("Service: fill rate & OTIF (eaches)")
     grain = st.radio("Break down by", ["region_name", "warehouse_code", "route_code", "outlet_name"],
                       horizontal=True, key="service_grain")
-    fr = cached_fill_rate(region, warehouse, channel, date_range, grain)
-    fr = fr[fr["ordered_eaches"] > 0]
+
+    # Switching grain is a cache miss (new key) -- without an explicit spinner
+    # here, Streamlit keeps the PREVIOUS grain's tables on screen until the
+    # new ones are ready, which reads as "the switch didn't work" or "this is
+    # showing stale data" rather than "this is loading." Computing both
+    # tables inside one spinner block means they replace each other atomically.
+    with st.spinner(f"Computing by {grain.replace('_', ' ')}..."):
+        fr = cached_fill_rate(region, warehouse, channel, date_range, grain)
+        fr = fr[fr["ordered_eaches"] > 0]
+        ot = cached_otif(region, warehouse, channel, date_range, grain)
+
     st.markdown("Worst performers first (case fill rate, eaches)")
     st.dataframe(fr, use_container_width=True,
                  column_config={"fill_rate_pct": st.column_config.NumberColumn(format="%.1f%%")})
 
-    ot = cached_otif(region, warehouse, channel, date_range, grain)
     st.markdown("OTIF, worst performers first")
     st.dataframe(ot, use_container_width=True,
                  column_config={"otif_pct": st.column_config.NumberColumn(format="%.1f%%")})
@@ -455,7 +463,7 @@ def ask_tab(ctx):
         st.session_state["ask_question"] = ""
 
     with st.container(border=True):
-        st.caption("No LLM key needed — try one of these, or type your own:")
+        st.caption("No LLM key needed. Try one of these, or type your own:")
         cols = st.columns(len(SUGGESTED_QUESTIONS))
         for i, sq in enumerate(SUGGESTED_QUESTIONS):
             if cols[i].button(sq, use_container_width=True, key=f"chip_{i}"):
