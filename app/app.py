@@ -69,9 +69,46 @@ div[data-testid="stVegaLiteChart"] {
     overflow-x: auto;
 }
 
-div[data-testid="stDataFrame"] {
+/* Every table in the app is now app/tables.py's paginated st.table (see
+   DECISIONS.md) instead of the interactive stDataFrame widget, which has
+   zero built-in styling of its own -- this is the difference between an
+   enterprise data table and a bare unstyled browser <table>. */
+div[data-testid="stTable"] {
     border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
     overflow: hidden;
+}
+div[data-testid="stTable"] table {
+    width: 100%;
+}
+div[data-testid="stTable"] thead th {
+    background: var(--kt-accent-tint);
+    color: var(--kt-accent);
+    font-weight: 600;
+    text-transform: none;
+    border-bottom: 1px solid rgba(57,135,229,0.35) !important;
+    padding: 10px 14px !important;
+}
+div[data-testid="stTable"] tbody td {
+    padding: 8px 14px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+}
+div[data-testid="stTable"] tbody tr:last-child td {
+    border-bottom: none !important;
+}
+div[data-testid="stTable"] tbody tr:hover td {
+    background: rgba(57,135,229,0.08);
+}
+/* pandas always renders the DataFrame index as a row-header column; after
+   paginated_table()'s reset_index(drop=True) that's just a meaningless
+   per-page 0/1/2.. counter, not real data. No Styler-based hide() available
+   (this env's jinja2 is too old for pandas' Styler), so hidden via CSS. */
+div[data-testid="stTable"] th.blank,
+div[data-testid="stTable"] th.row_heading {
+    display: none;
+}
+div[data-testid="stTable"] td {
+    font-variant-numeric: tabular-nums;
 }
 
 section[data-testid="stSidebar"] {

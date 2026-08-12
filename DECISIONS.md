@@ -195,6 +195,38 @@ needed anywhere. `python run.py` from a clean checkout is the one command.
     documented above under "Breaks first in production"); the Ask
     Anything "first-match-wins" behavior on compound questions is a
     already-documented, accepted design limit, not a new bug.
+- **Fourth `design-taste-frontend` pass, explicitly asked to push toward
+  "business aspired" polish.** The skill's own Section 13 names the
+  official answer for enterprise analytics dashboards (Carbon, Fluent) --
+  not applicable here since this is Streamlit, not React, so pulled its
+  taste judgment rather than component libraries, same as every prior
+  pass. Found one real, high-impact gap: the `st.table` conversion above
+  had zero custom styling, unlike every other element in the app --
+  a plain unstyled browser `<table>` sitting inside an otherwise
+  carefully art-directed dark theme is exactly the kind of "unfinished
+  default" tell the skill exists to catch, just relocated from a
+  landing-page cliche to a dashboard one. Fixed:
+  - Header row now uses the app's own accent tint/color (matching every
+    other accented element) instead of default Streamlit table chrome,
+    with a row-hover state for scannability on the now-common 15-32-page
+    tables.
+  - pandas renders the DataFrame index as a visible row-header column by
+    default; after `paginated_table()`'s `reset_index(drop=True)` that
+    was a meaningless per-page 0/1/2.. counter, not real data. Hidden.
+  - `font-variant-numeric: tabular-nums` on all table cells so digits
+    in the same column line up consistently, standard practice for any
+    numbers-heavy interface.
+  - **Live-verification caught a real bug before it shipped**: the
+    first attempt used `df.style.hide(axis="index")` (pandas' own,
+    more correct API for this) which crashed every table with
+    `ImportError: pandas requires jinja2>=3.0.0` -- this environment
+    ships jinja2 2.11.2, and upgrading a shared Anaconda dependency
+    to unblock one cosmetic fix was the wrong tradeoff. Reverted to a
+    plain DataFrame plus CSS-based index hiding (`th.blank, th.row_heading
+    { display: none }`), which needed no dependency changes -- confirmed
+    by testing the *deployed* code, not just re-reading it, per this
+    project's practice of catching UX bugs through live use, not
+    read-through.
 
 ## Next, with two more weeks
 

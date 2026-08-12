@@ -41,12 +41,13 @@ def paginated_table(df, formats=None, page_size=15, key="table"):
     start = (page - 1) * page_size
     view = df.iloc[start:start + page_size].reset_index(drop=True).copy()
     formats = formats or {}
+    numeric_cols = set(view.select_dtypes(include="number").columns)
 
     # st.table falls back to pandas' default float display (four decimals,
     # thousands separators) for any numeric column with no explicit format --
     # "106,578.0000" for a whole-number eaches count. Give every unformatted
     # numeric column a sane default instead of leaving that to chance.
-    for col in view.select_dtypes(include="number").columns:
+    for col in numeric_cols:
         if col in formats:
             continue
         non_null = view[col].dropna()
@@ -63,6 +64,12 @@ def paginated_table(df, formats=None, page_size=15, key="table"):
             rename[col] = label
     view = view.rename(columns=rename)
 
+    # A Styler (needed to hide the index / right-align numeric columns
+    # cleanly) requires jinja2>=3, and this environment's jinja2 is 2.11.2 --
+    # pandas raises ImportError on .style with no fallback. The pandas index
+    # column (a meaningless per-page 0/1/2.. that CSS alone can hide, unlike
+    # per-column alignment) is dropped via app.py's CSS instead; see
+    # `th.blank, th.row_heading { display: none }` there.
     st.table(view)
     if n_pages > 1:
         st.caption(f"Page {page} of {n_pages} -- {n:,} rows total.")
