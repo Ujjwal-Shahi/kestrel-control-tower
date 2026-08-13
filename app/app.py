@@ -539,6 +539,27 @@ def overview_tab(region, warehouse, channel, date_range):
     quarter_num = ((q_start.month - 4) % 12) // 3 + 1
     st.subheader(f"Q{quarter_num} FY: {q_start:%b %Y} to {q_end:%b %Y} (the board asks about Q1 first)")
 
+    # These KPIs are pinned to the last complete quarter by design (Rakesh's
+    # brief: "Q1 is on the front page, the board asks about Q1 first, every
+    # time") -- the sidebar date range narrows WITHIN that quarter, it
+    # doesn't replace it. A range entirely outside the quarter (e.g. Feb
+    # 2026 when the quarter is Apr-Jun 2026) correctly intersects to nothing
+    # and every tile below reads "n/a" -- found via a UX audit that this
+    # degrades gracefully but with zero on-screen explanation, reading as
+    # "the dashboard is broken" rather than as the intentional, quarter-
+    # pinned behavior it is. Other tabs aren't pinned to a quarter and
+    # reflect the date range directly, so this note is Overview-only.
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        sel_start, sel_end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
+        if sel_end < q_start or sel_start > q_end:
+            st.info(
+                f"The sidebar date range ({sel_start:%d %b %Y} to {sel_end:%d %b %Y}) falls "
+                f"outside this quarter, so the KPIs below have nothing to show. This section "
+                f"is pinned to the last complete quarter; the date filter narrows within it "
+                f"rather than replacing it. Other tabs aren't quarter-pinned and reflect the "
+                f"date range directly."
+            )
+
     fr = cached_fill_rate(region, warehouse, channel, date_range, "region_name", q_start, q_end)
     fr_by_outlet = cached_fill_rate(region, warehouse, channel, date_range, "outlet_name", q_start, q_end)
     fr_val = round(fr["delivered_eaches"].sum() / fr["ordered_eaches"].sum() * 100, 1) \
