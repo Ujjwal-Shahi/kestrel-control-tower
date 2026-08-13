@@ -95,9 +95,16 @@ def t_lowest_fill_rate(q, ctx):
         n = int(m.group(1))
     start, end, label = _window(q, ctx)
     g = metrics.fill_rate_eaches(_scope(ctx["ol"], start, end), ["outlet_name"])
-    g = g[g["ordered_eaches"] > 0].head(n)
+    g = g[g["ordered_eaches"] > 0]
+    # Asking for more outlets than exist (e.g. "9999 lowest fill rate
+    # outlets") used to echo the requested n verbatim in the header even
+    # though head(n) could only ever return len(g) rows -- found via a
+    # correctness audit ("9999 lowest ... outlets" over a 70-row table).
+    # Report what's actually shown, not what was asked for.
+    shown = min(n, len(g))
+    g = g.head(n)
     scope_txt = f" in {label}" if label else " across all 18 months of data"
-    text = (f"{n} lowest case fill rate outlets{scope_txt} (measured in eaches; closed, "
+    text = (f"{shown} lowest case fill rate outlets{scope_txt} (measured in eaches; closed, "
             f"deleted and test outlets excluded):")
     return text, g
 
@@ -215,7 +222,11 @@ def t_discontinued(q, ctx):
     g = metrics.discontinued_orders(ctx["ol"])[
         ["order_id", "outlet_name", "sku_code", "order_date", "discontinued_date"]
     ]
-    text = f"{len(g)} order lines ordered a SKU after its discontinuation date:"
+    # The stated total and the table's page-count footer are both true but
+    # were unreconciled -- a reader saw "14370 order lines" next to a table
+    # footer saying "50 rows total" with nothing explaining the gap.
+    shown_note = " (showing the first 50; download the CSV for all)" if len(g) > 50 else ""
+    text = f"{len(g)} order lines ordered a SKU after its discontinuation date{shown_note}:"
     return text, g.head(50)
 
 

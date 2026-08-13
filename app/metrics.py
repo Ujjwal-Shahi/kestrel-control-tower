@@ -256,7 +256,15 @@ def price_position(price_matches, products, city=None):
     lowest["gap_pct"] = (lowest["gap_inr"] / lowest["kestrel_mrp_inr"] * 100).round(1)
     lowest = lowest.merge(products[["sku_code", "category"]], left_on="matched_sku_code",
                            right_on="sku_code", how="left").drop(columns="sku_code")
-    return lowest.sort_values("gap_pct")
+    # Descending, not ascending: gap_pct = (our MRP - lowest competitor) / our MRP,
+    # so a POSITIVE gap means we're priced above the market -- that's the
+    # exposed direction (a customer can trivially find it cheaper elsewhere).
+    # Ascending put the most NEGATIVE (cheapest-relative, least exposed) SKUs
+    # first, the opposite of both this tab's own category chart (already
+    # sorts descending, app/app.py price_tab) and the NL layer's explicit
+    # claim of "most competitively exposed first" -- found via a correctness
+    # audit that caught the two disagreeing.
+    return lowest.sort_values("gap_pct", ascending=False)
 
 
 def discontinued_orders(order_lines):
