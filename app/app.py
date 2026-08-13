@@ -424,7 +424,21 @@ def cached_freight_cost(region, warehouse, channel, date_range):
     if ctx["freight"].empty:
         return pd.DataFrame()
     ol = _filtered(ctx, "ol", region, warehouse, channel, date_range)
-    return metrics.freight_cost_per_case(ctx["freight"], ol, ctx["data"]["warehouses"])
+    # The date_range sidebar filter narrowed `ol` (the cases/denominator) but
+    # was never passed to the freight side (the amount/numerator) -- found
+    # live while auditing this metric. Region/Warehouse happened to work by
+    # accident (freight has no channel dimension, but warehouse_code does,
+    # and the inner join in freight_cost_per_case naturally drops any
+    # warehouse absent from the filtered cases side); the date window did
+    # not, silently dividing a date-filtered numerator by an unfiltered
+    # denominator. Channel still can't be applied -- freight invoices carry
+    # no channel field at all (see freight_cost_per_case's own docstring on
+    # why this is a warehouse-month aggregate, not an order-level join).
+    period_start = period_end = None
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        period_start, period_end = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
+    return metrics.freight_cost_per_case(ctx["freight"], ol, ctx["data"]["warehouses"],
+                                          period_start=period_start, period_end=period_end)
 
 
 @st.cache_data(show_spinner=False)
