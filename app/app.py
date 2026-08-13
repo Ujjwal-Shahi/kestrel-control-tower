@@ -786,8 +786,14 @@ def price_tab(ctx):
         key=f"price_matched_skus_{city}",
     )
     match_rate = ctx["price_matches"]["matched_sku_code"].notna().mean() * 100
-    st.caption(f"{match_rate:.0f}% of scraped listings matched to a Kestrel SKU "
-               f"(see DECISIONS.md on matching method and confidence thresholds).")
+    in_stock_pct = (ctx["price_matches"].get("stock_status", pd.Series(dtype=str)) == "IN_STOCK").mean() * 100
+    st.caption(
+        f"{match_rate:.0f}% of scraped listings matched to a Kestrel SKU. "
+        f"Price floor uses IN-STOCK listings only ({in_stock_pct:.0f}% of listings). "
+        f"UNAVAILABLE listings are excluded -- a price on an out-of-stock item is not a "
+        f"price on the shelf -- same principle as excluding DISPUTED freight and REJECTED "
+        f"credit notes. See DECISIONS.md."
+    )
 
 
 SUGGESTED_QUESTIONS = [
