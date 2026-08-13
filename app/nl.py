@@ -179,9 +179,15 @@ def t_price_gap(q, ctx):
         g = g.merge(top, left_on="matched_sku_code", right_on="sku_code",
                     how="left").drop(columns="sku_code")
         g = g.sort_values("shipped_value_inr", ascending=False)
+        # g has one row per (SKU, city) match, not one row per SKU -- a SKU
+        # observed in 4 cities contributes 4 rows. len(g) as a "how many of
+        # the top N SKUs matched" count over-reports (can exceed N entirely,
+        # as it did here: 37 rows from as few as 6 distinct SKUs). Count
+        # unique SKUs instead.
+        matched_skus = g["matched_sku_code"].nunique()
         text = (f"Top {n} SKUs by shipped value vs the lowest observed competitor price "
-                f"({label}). {len(g)} of the top {n} are stocked by a scraped retailer there; "
-                f"the rest have no competitor observation to compare against:")
+                f"({label}). {matched_skus} of the top {n} are stocked by a scraped retailer "
+                f"there; the rest have no competitor observation to compare against:")
         return text, g
 
     text = f"MRP vs lowest observed competitor price ({label}), most competitively exposed first:"

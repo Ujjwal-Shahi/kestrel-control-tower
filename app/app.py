@@ -607,7 +607,7 @@ def _spread_note(df, col, grain_label):
     spread = float(df[col].max() - df[col].min())
     if spread < 1.0:
         st.caption(
-            f":warning: Spread across {grain_label} is only {spread:.2f} percentage points "
+            f"Note: spread across {grain_label} is only {spread:.2f} percentage points "
             f"({df[col].min():.1f}%-{df[col].max():.1f}%). This ranking is ordering noise, not "
             f"performance -- no {grain_label} is materially worse than another. The finding is "
             f"the uniform level itself, not the order."
