@@ -1,11 +1,20 @@
 """
-Reproduces every data-quality claim asserted in DECISIONS.md, straight from the
-raw db. Exists so the claims are checkable rather than assertions -- if a number
-in DECISIONS.md drifts from the data, this script fails loudly instead of the
-doc quietly going stale.
+Reproduces every DECISIONS.md data-quality claim that's derivable from the raw
+operational db, straight from that db. Exists so the claims are checkable
+rather than assertions -- if a number in DECISIONS.md drifts from the data,
+this script fails loudly instead of the doc quietly going stale.
+
+Scope: the DISPUTED-freight-invoice claim (~20% of invoice value, 58-97%
+cost/case overstatement) is NOT checked here -- freight invoices live in
+freight/cache/invoices.csv, written by freight/ingest.py from the mock
+partner API, not in the raw db this script opens. That claim has no
+raw-db-only reproduction path.
 
 Run: python etl/verify_data_findings.py
-Exit code 0 = every claim holds.
+Exit code 0 = every claim checked here holds. Thresholds are intentionally
+loose (directional, not exact-match) so harmless rounding in the source data
+doesn't cause false failures -- the specific numbers quoted in DECISIONS.md's
+prose are printed for a human to compare, not asserted bit-for-bit.
 """
 import os
 import sqlite3
@@ -124,10 +133,15 @@ def main():
     )
 
     # ---- 5. KP-2301 (header vs line value mismatch) is not reproducible ----
+    # LEFT JOIN + COALESCE, not INNER JOIN: an order with zero order_lines
+    # rows would silently vanish from an inner join instead of counting as a
+    # (order_value_gross_inr - 0) mismatch. If KP-2301 specifically affected
+    # orders missing lines entirely, an inner join would never see them and
+    # this check would falsely PASS.
     k = pd.read_sql(
-        """SELECT o.source_system, SUM(ABS(o.order_value_gross_inr - l.lt)) diff
-           FROM orders o JOIN (SELECT order_id, SUM(line_value_inr) lt FROM order_lines
-                               GROUP BY order_id) l ON l.order_id = o.order_id
+        """SELECT o.source_system, SUM(ABS(o.order_value_gross_inr - COALESCE(l.lt, 0))) diff
+           FROM orders o LEFT JOIN (SELECT order_id, SUM(line_value_inr) lt FROM order_lines
+                                    GROUP BY order_id) l ON l.order_id = o.order_id
            GROUP BY o.source_system""",
         conn,
     )
@@ -178,6 +192,45 @@ def main():
         max(spreads.values()) < 1.0,
         "spread is " + ", ".join(f"{k.replace('_id','')} {v:.2f}pp" for k, v in spreads.items())
         + ". Reported honestly in the UI rather than presented as a performance ranking.",
+    )
+
+    # ---- 8. Every route in the network breaches the late-delivery bar ----
+    # Mirrors app/metrics.py's late_routes(): >120 min late counts as "very
+    # late", a route needs >=10 deliveries to be scored, and it's flagged if
+    # >10% of its deliveries are very late. app/nl.py's t_late_routes uses
+    # this to decide whether to present the result as a shortlist of problem
+    # routes or state that lateness is network-wide -- fully raw-db-derivable
+    # and load-bearing for that behavior, so it belongs here.
+    lr = pd.read_sql(
+        "SELECT rt.route_code, d.delay_minutes FROM deliveries d "
+        "JOIN routes rt ON rt.route_id = d.route_id", conn,
+    )
+    lr["very_late"] = lr["delay_minutes"] > 120
+    g = lr.groupby("route_code").agg(deliveries=("delay_minutes", "count"), very_late=("very_late", "sum"))
+    g = g[g["deliveries"] >= 10]
+    breach = g["very_late"] / g["deliveries"] > 0.10
+    check(
+        "nearly every scored route breaches the >2h-late->10%-of-deliveries bar",
+        breach.mean() > 0.95,
+        f"{breach.sum()} of {len(g)} routes with >=10 deliveries breach the bar "
+        f"({breach.mean() * 100:.1f}%). Lateness is network-wide, not route-specific.",
+    )
+
+    # ---- 9. Returns run a few basis points of dispatch value, not whole percent ----
+    # Mirrors app/metrics.py's returns_pct_of_dispatch_bps(): dispatch value is
+    # fulfilled-order net value, returns value is SETTLED (APPROVED/PENDING,
+    # excluding REJECTED) credit notes. Fully raw-db-derivable and it's the
+    # number the Overview KPI tile shows, so it belongs here too.
+    disp = pd.read_sql(
+        "SELECT order_value_net_inr v FROM orders WHERE order_status IN ('DELIVERED','PARTIAL')", conn,
+    )["v"].sum()
+    settled = cn.loc[cn.status.isin(["APPROVED", "PENDING"]), "v"].sum()
+    bps = settled / disp * 10_000
+    check(
+        "returns vs dispatch value is a few basis points, not whole percent",
+        0.5 < bps < 20,
+        f"{bps:.1f} bps ({bps / 100:.3f}%) of dispatch value. Reported in bps because a one-decimal "
+        f"percentage would round to '0.0%' and read as a broken metric rather than a small one.",
     )
 
     conn.close()

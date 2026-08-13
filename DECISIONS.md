@@ -10,8 +10,11 @@ NL-to-query mapper covering the brief's illustrative questions plus "why did
 fill rate drop in region X last week" -- no LLM key needed anywhere.
 `python run.py` from a clean checkout is the one command.
 
-Every data-quality claim below is reproducible: `python etl/verify_data_findings.py`
-re-derives all of them from the raw db and exits non-zero if any stops holding.
+Every data-quality claim below that's derivable from the raw operational db is
+reproducible: `python etl/verify_data_findings.py` re-derives it and exits
+non-zero if any stops holding. One exception: the DISPUTED-freight-invoice
+finding lives in `freight/cache/invoices.csv` (the mock partner API), not the
+raw db, so it has no raw-db-only reproduction and isn't in that script.
 
 ## Data findings that changed a metric
 
