@@ -32,11 +32,14 @@ def paginated_table(df, formats=None, page_size=15, key="table"):
 
     n = len(df)
     n_pages = max(1, math.ceil(n / page_size))
-    if n_pages > 1:
-        page = st.number_input("Page", min_value=1, max_value=n_pages, value=1, step=1,
-                                key=f"{key}_page")
-    else:
-        page = 1
+    page_key = f"{key}_page"
+    # Read from session_state directly rather than a widget, so the page
+    # number buttons can be drawn AFTER the table (per request: below it,
+    # not above) while still controlling THIS run's slice -- a button's
+    # click is only visible to the *next* rerun, so the row is read here
+    # first, at the value the previous click (or the default) left behind.
+    page = st.session_state.get(page_key, 1)
+    page = min(max(page, 1), n_pages)  # clamp: a filter change can shrink n_pages between reruns
 
     start = (page - 1) * page_size
     view = df.iloc[start:start + page_size].reset_index(drop=True).copy()
@@ -71,7 +74,20 @@ def paginated_table(df, formats=None, page_size=15, key="table"):
     # per-column alignment) is dropped via app.py's CSS instead; see
     # `th.blank, th.row_heading { display: none }` there.
     st.table(view)
+
     if n_pages > 1:
+        # One button per page number, not a +/- stepper -- a stepper hides
+        # how many pages exist and how far the current one is from the ends;
+        # a full row makes every page directly reachable and visible at a
+        # glance. gap="small" plus every column getting an equal, narrow
+        # share keeps this usable even at Price Position's 32 pages.
+        cols = st.columns(n_pages, gap="small")
+        for i, col in enumerate(cols):
+            p = i + 1
+            if col.button(str(p), key=f"{key}_pagebtn_{p}",
+                          type="primary" if p == page else "secondary"):
+                st.session_state[page_key] = p
+                st.rerun()
         st.caption(f"Page {page} of {n_pages} -- {n:,} rows total.")
 
     st.download_button("Download as CSV", df.to_csv(index=False).encode("utf-8"),

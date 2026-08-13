@@ -92,7 +92,8 @@ div[data-testid="stMetricValue"] {
 }
 
 button[data-testid="stBaseButton-secondary"],
-button[data-testid="stBaseButton-primaryFormSubmit"] {
+button[data-testid="stBaseButton-primaryFormSubmit"],
+button[data-testid="stBaseButton-primary"] {
     border-radius: 10px !important;
     transition: border-color 0.2s ease, background 0.2s ease, transform 0.1s ease;
 }
@@ -104,8 +105,19 @@ button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
 /* Tactile feedback on click (skill's Section 4.5) -- a real physical-press
    cue, not decoration, so it's gated to :active only. */
 button[data-testid="stBaseButton-secondary"]:active,
-button[data-testid="stBaseButton-primaryFormSubmit"]:active {
+button[data-testid="stBaseButton-primaryFormSubmit"]:active,
+button[data-testid="stBaseButton-primary"]:active {
     transform: translateY(1px) scale(0.98);
+}
+/* Pagination page-number buttons (app/tables.py) -- the current page uses
+   Streamlit's own type="primary" (solid accent fill), everything else is
+   the default secondary style above. Tight padding keeps a 32-page row
+   (Price Position's matched-SKU list) from forcing horizontal scroll on
+   the whole page. */
+div[data-testid="stHorizontalBlock"] button[data-testid^="stBaseButton"] {
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 8px;
 }
 
 /* Status badges (Overview KPI trend chips) -- was plain colored text via
